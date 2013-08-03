@@ -1,4 +1,4 @@
-{-# LANGUAGE GADTs, OverloadedStrings, ScopedTypeVariables, TypeFamilies, RankNTypes, FlexibleInstances, StandaloneDeriving, DeriveDataTypeable, FlexibleContexts #-}
+{-# LANGUAGE GADTs, OverloadedStrings, ScopedTypeVariables, TypeFamilies, RankNTypes, FlexibleInstances, StandaloneDeriving, DeriveDataTypeable, FlexibleContexts, NoMonomorphismRestriction, TypeOperators #-}
 module Data.LiveFusion.Combinators where
 
 import qualified Data.Vector.Unboxed as V
@@ -11,14 +11,20 @@ import Data.Typeable
 import GHC hiding ( Name )
 import GHC.Paths -- ( libdir )
 import DynFlags -- ( defaultFatalMessager, defaultFlushOut )
+import Control.Exception
 import Debug.Trace
 import System.IO
 import System.IO.Unsafe
 import System.FilePath
 import Data.Reify
-import Data.Map as Map (Map(..), (!), fromList)
+import Data.Reify.Graph
+import Data.Map as Map hiding ( map, filter )
 import Control.Applicative
 import Text.Show.Functions
+import Data.Maybe
+import Data.List as List ( union )
+import Data.Dynamic
+import Text.Printf
 
 tr a = trace (show a) a
 
@@ -26,13 +32,14 @@ uc = unsafeCoerce
 
 ucText = "unsafeCoerce"
 
-type Arg = Any
+type Arg = Dynamic
 
 class (Show a, V.Unbox a, Typeable a) => Elt a
 
 instance Elt Int
 instance Elt Float
 instance Elt Double
+instance Elt Bool
 instance (Elt a, Elt b) => Elt (a,b)
 
 type ArrayAST a = AST (V.Vector a)
@@ -64,6 +71,7 @@ data AST2 e s where
   ArrLit2  :: Elt a => V.Vector a -> ArrayAST2 a s
   Var      :: Typeable e => s -> AST2 e s
 
+
 deriving instance Show s => Show (AST2 e s)
 deriving instance Typeable2 AST2
 
@@ -85,12 +93,226 @@ instance Typeable e => MuRef (AST e) where
 getVar :: Typeable e => Map Name (WrappedAST Name) -> Name -> Maybe (AST2 e Name)
 getVar m n = case m ! n of Wrap  e -> cast e
 
-conv :: Typeable e => AST e -> IO (Map Name (WrappedAST Name), Maybe (AST2 e Name))
-conv e = do
+recoverSharing :: Typeable e => AST e -> IO (Map Name (WrappedAST Name), Name, Maybe (AST2 e Name))
+recoverSharing e = do
   Graph l n <- reifyGraph e
   let m = Map.fromList l
-  return (m, getVar m n)
-{-# NOINLINE conv #-}
+  return (m, n, getVar m n)
+{-# NOINLINE recoverSharing #-}
+
+var :: Name -> String
+var n = "var" ++ (show n)
+
+arg :: Name -> String
+arg n = "arg" ++ (show n)
+
+res :: Name -> String
+res n = "res" ++ (show n)
+
+-- A really ugly and error-prome loop representation
+data Loop = Loop (Map Name Arg)  {- Arguments -}
+                 (Map Name Expr) {- Bindings -}
+                 [Name] {- Arrays to iterate -}
+                 Int {- Minimum array length -} -- TODO not a great way to do it
+
+instance Show Loop where
+  show (Loop args binds arrs len)
+    = "Loop (Args:  " ++ (show $ P.map arg $ Map.keys args) ++ ")\n" ++
+      "     (Binds: " ++ show binds ++ ")\n" ++
+      "     (Arrs:  " ++ (show $ P.map var $ arrs) ++ ")"
+
+addArg name arg (Loop args binds arrs len) = Loop (insert name arg args) binds arrs len
+
+addBind name expr (Loop args binds arrs len) = Loop args (insert name expr binds) arrs len
+
+addVec name (Loop args binds arrs len) = Loop args binds (name:arrs) len
+
+setLen n (Loop args binds arrs len) | len == 0   = Loop args binds arrs n
+                                    | otherwise = Loop args binds arrs (n `min` len)
+
+loopUnion (Loop args1 binds1 arrs1 len1) (Loop args2 binds2 arrs2 len2)
+  = Loop (args1 `Map.union` args2) (binds1 `Map.union` binds2) (arrs1 `List.union` arrs2) (len1 `min` len2)
+
+emptyLoop = Loop Map.empty Map.empty [] 0
+
+{-
+data VarArg e where
+  VarE :: forall e . (Elt e) => Name -> VarArg e
+  ArgE :: forall e . (Elt e) => Name -> VarArg e
+
+data Expr e where
+  App1 :: (Elt a, Elt b) => VarArg (a -> b) -> VarArg a -> Expr b
+  App2 :: (Elt a, Elt b, Elt c) => VarArg (a -> b -> c) -> VarArg a -> VarArg b -> Expr c
+-}
+data VarArg where
+  VarE :: Name -> VarArg
+  ArgE :: Name -> VarArg
+  deriving Show
+
+data Expr where
+  App1 :: VarArg -> VarArg -> Expr
+  App2 :: VarArg -> VarArg -> VarArg -> Expr
+  deriving Show
+
+
+fuse :: Typeable e => Map Name (WrappedAST Name) -> (AST2 e Name) -> Name -> (Name, Loop, Name)
+fuse env = fuse'
+  where
+    fuse' :: Typeable e => (AST2 e Name) -> Name -> (Name, Loop, Name)
+    fuse' var@(Var name) _ = let ast = fromJust $ (getVar env name) `asTypeOf` (Just var)
+                             in  fuse' ast name
+    fuse' (Map2 f arr) name = let (arr_name, arr_loop, arr_res) = fuse' arr name -- TODO: this name means nothing
+                                  loop = addArg name (toDyn f)
+                                       $ addBind name (App1 (ArgE name) (VarE arr_res))
+                                       $ arr_loop
+                              in  (name, loop, name)
+    fuse' (ZipWith2 f arr brr) name = let (arr_name, arr_loop, arr_res) = fuse' arr name
+                                          (brr_name, brr_loop, brr_res) = fuse' brr name
+                                          abrr_loop = arr_loop `loopUnion` brr_loop
+                                          loop = addArg name (toDyn f)
+                                               $ addBind name (App2 (ArgE name) (VarE arr_res) (VarE brr_res))
+                                               $ abrr_loop
+                                      in  (name, loop, name)
+    fuse' (ArrLit2 vec) name = let loop = setLen (V.length vec)
+                                        $ addArg name (toDyn vec)
+                                        $ addVec name
+                                        $ emptyLoop
+                               in  (name, loop, name)
+
+
+(++:\) str1 str2 = str1 ++ ";\n" ++ str2
+
+
+pluginCode :: Typeable e => AST e -> String -> String -> IO (String, [Arg])
+pluginCode ast moduleName entryFnName = do
+  (env, rootName, Just rootNode) <- recoverSharing ast
+  let (_, loop, _) = fuse env rootNode rootName
+      (bodyCode, args) = pluginEntryCode entryFnName rootNode rootName loop
+      code = preamble moduleName ++\ bodyCode
+  return (code, args)
+
+
+justCode :: Typeable e => AST e -> IO ()
+justCode ast = putStrLn =<< indexed <$> fst <$> pluginCode ast "Plugin" "pluginEntry"
+
+pluginEntryCode :: Typeable a => String -> AST2 a Name -> Name -> Loop -> (String, [Arg])
+pluginEntryCode entryFnName ast rootName loop@(Loop args _ _ _)
+  = let code = entryFnName ++ " :: [Dynamic] -> Dynamic" ++\
+               entryFnName `space` argsMatch ++\
+               "  = toDyn $ runST $ loopST " ++ argsPass ++\
+               " " ++\
+               lSTCode
+    in  (code, Map.elems args)
+  where
+    lSTCode   = loopSTCode (typeOf $ resultType ast) rootName loop
+    argsMatch = showStringList $ P.map arg argNames   -- "[arg1, arg2, ...]"
+    argsPass  = juxtMap coerceArg argNames  -- "(fd arg1) (fd arg2) ... "
+    coerceArg = paren . ("fd "++) . arg      -- "(fd arg1)"
+    argNames  = Map.keys args
+    resultType :: t a b -> a
+    resultType _ = undefined
+
+showStringList :: [String] -> String
+showStringList = brackets . P.intercalate ", "
+  where brackets s = "[" ++ s ++ "]"
+
+intercalateMap :: String -> (a -> String) -> [a] -> String
+intercalateMap sep f = P.intercalate sep . P.map f
+
+juxtMap :: (a -> String) -> [a] -> String
+juxtMap f = intercalateMap " " f
+
+loopSTCode :: TypeRep -> Name -> Loop -> String
+loopSTCode resultTy rootName (Loop args binds arrs len)
+  = "loopST :: " ++ argsTypes ++ " -> ST s " ++ (paren $ show resultTy) ++\
+    "loopST " ++ argsList ++ " =" ++\
+    "  do {" ++\
+    "    dst <- MV.new n" ++:\
+    "    loop dst 0" ++:\
+    "    dst' <- V.unsafeFreeze dst" ++:\
+    "    return dst' }" ++\
+    "  where {" ++\
+    "    n = " ++ (show len) ++:\
+    "    loop dst i = case i < n of {" ++\
+    "      True  -> " ++\
+    "        let { " ++\ indent 5 letsCode ++
+    "        } in do {" ++\
+    "          MV.unsafeWrite dst i " ++ (var rootName) ++:\
+    "          loop dst (i+1)" ++\
+    "        }" ++:\
+    "      False -> return () }}"
+  where
+    (argNames, argVals) = P.unzip $ Map.toList args
+    argsTypes = P.intercalate " -> "
+              $ P.map (paren . show . dynTypeRep) argVals
+    argsList  = P.intercalate " "
+              $ P.map arg argNames
+    letsCode = P.intercalate ";\n"
+             $ takesCode arrs ++ bindsCode binds
+    -- reads elements from the arrays
+
+indent :: Int -> String -> String
+indent n = unlines . P.map (P.replicate (n*2) ' ' ++) . lines
+
+indexed :: String -> String
+indexed = unlines . indexed' . lines
+  where
+    indexed' :: [String] -> [String]
+    indexed' = P.zipWith space
+                         (P.map linum [1..])
+    linum (i::Int) = printf "%2d" i
+
+
+takesCode :: [Name] -> [String]
+takesCode = P.map takeCode
+  where
+    takeCode name = (var name) ++ " = V.unsafeIndex " ++ (arg name) `space` "i" -- TODO horrible
+
+bindsCode :: (Map Name Expr) -> [String]
+bindsCode = P.map bindCode . Map.toList
+  where
+    bindCode (name, expr) = (lhs name) ++ " = " ++ (rhs expr)
+    lhs = var
+    rhs (App1 fun arg)       = (vargCode fun)  `space` (vargCode arg)
+    rhs (App2 fun arg1 arg2) = (vargCode fun)  `space`
+                               (vargCode arg1) `space`
+                               (vargCode arg2)
+    vargCode (VarE name) = var name
+    vargCode (ArgE name) = arg name
+
+space str1 str2 = str1 ++ " " ++ str2
+
+paren :: String -> String
+paren s = "(" ++ s ++ ")"
+
+pprArg :: Int -> String
+pprArg ix = "arg" ++ (show ix)
+
+pprUCArg :: Typeable a => Int -> a -> String
+pprUCArg ix a = ("unsafeCoerce " ++ (pprArg ix)) `pprAsTy` a
+
+pprAsTy :: Typeable a => String -> a -> String
+pprAsTy var a = paren $ var ++ " :: " ++ (show $ typeOf a)
+
+infixr 5  ++\
+(++\) :: String -> String -> String
+(++\) l r = l ++ "\n" ++ r
+
+preamble :: String -> String
+preamble moduleName =
+  "module " ++ moduleName ++ " where       " ++\
+  "import Data.Vector.Unboxed as V         " ++\
+  "import Data.Vector.Unboxed.Mutable as MV" ++\
+  "import Unsafe.Coerce                    " ++\
+  "import Data.Dynamic                     " ++\
+  "import GHC.Prim (Any)                   " ++\
+  "import Control.Monad.ST                 " ++\
+  "                                        " ++\
+  "fd :: Typeable a => Dynamic -> a        " ++\
+  "fd d = case fromDynamic d of            " ++\
+  "         Just v  -> v                   " ++\
+  "         Nothing -> error \"Argument type mismatch\"" ++\
+  "                                        "
 
 instance Show (AST e) where
   show (Map _ arr) = "MapAST (" P.++ (show arr) P.++ ")"
@@ -125,102 +347,19 @@ eval :: Elt a => ArrayAST a -> V.Vector a
 eval (ArrLit vec) = vec
 eval op = evalAST op
 
-evalAST :: AST a -> a
+evalAST :: Typeable a => AST a -> a
 evalAST = unsafePerformIO . evalIO
 {-# NOINLINE evalAST #-}
 
---interpAST (Map f arr) = V.map f (eval arr)
---interpAST (Filter p arr) = V.filter p (eval arr)
---interpAST (ZipWith f arr brr) = V.zipWith f (eval arr) (eval brr)
---interpAST (Zip arr brr) = V.zip (eval arr) (eval brr)
---interpAST (Fold f z arr) = V.foldl f z (eval arr)
-
-pluginCode :: AST a -> String -> String -> (String, [Arg])
-pluginCode op moduleName entryFnName
-  = let (code, args) = opCode op 0
-        nargs = P.length args
-        argsPat = P.intercalate ", "
-                $ P.map ("arg" ++)
-                $ P.map show
-                $ P.reverse [0..nargs-1]
-        resultCode = preamble moduleName               ++\
-                     entryFnName ++ " :: [Any] -> Any" ++\
-                     entryFnName ++ "[" ++ argsPat ++ "] = "
-                                 ++ "unsafeCoerce " ++ paren code ++ " :: Any"
-    in  (resultCode, args)
-
---arrayCode :: Elt a => ArrayAST a -> Int -> (String, [Arg])
---arrayCode (Manifest vec) ix = (pprUCArg ix vec, [uc vec])
---arrayCode (Delayed  op)  ix = opCode op ix
-
-opCode :: AST a -> Int -> (String, [Arg])
-opCode (Map f arr) ix
-  = let (arrCode, arrArgs) = opCode arr ix
-        args = (uc f) : arrArgs
-        fix  = ix + P.length arrArgs
-        code = "V.map " ++ (pprUCArg fix f) ++ (paren arrCode)
-    in  (code, args)
-opCode (Filter p arr) ix
-  = let (arrCode, arrArgs) = opCode arr ix
-        args = (uc p) : arrArgs
-        pix  = ix + P.length arrArgs
-        code = "V.filter " ++ (pprUCArg pix p) ++ (paren arrCode)
-    in  (code, args)
-opCode (ZipWith f arr brr) ix
-  = let (brrCode, brrArgs) = opCode brr ix
-        (arrCode, arrArgs) = opCode arr (P.length brrArgs)
-        args = (uc f) : arrArgs ++ brrArgs
-        fix  = ix + P.length arrArgs + P.length brrArgs
-        code = "V.zipWith " ++ (pprUCArg fix f) ++ (paren arrCode) ++ (paren brrCode)
-    in  (code, args)
-opCode (Zip arr brr) ix
-  = let (brrCode, brrArgs) = opCode brr ix
-        (arrCode, arrArgs) = opCode arr (P.length brrArgs)
-        args = arrArgs ++ brrArgs
-        code = "V.zip " ++ (paren arrCode) ++ (paren brrCode)
-    in  (code, args)
-opCode (Fold f z arr) ix
-  = let (arrCode, arrArgs) = opCode arr ix
-        args = (uc f) : (uc z) : arrArgs
-        zix  = ix + P.length arrArgs
-        fix  = ix + P.length arrArgs + 1
-        code = "V.foldl " ++ (pprUCArg fix f) ++ (pprUCArg zix z) ++ (paren arrCode)
-    in  (code, args)
-opCode (ArrLit vec) ix
-  = (pprUCArg ix vec, [uc vec])
-
-paren :: String -> String
-paren s = "(" ++ s ++ ")"
-
-pprArg :: Int -> String
-pprArg ix = "arg" ++ (show ix)
-
-pprUCArg :: Typeable a => Int -> a -> String
-pprUCArg ix a = ("unsafeCoerce " ++ (pprArg ix)) `pprAsTy` a
-
-pprAsTy :: Typeable a => String -> a -> String
-pprAsTy var a = paren $ var ++ " :: " ++ (show $ typeOf a)
-
-infixr 5  ++\
-(++\) :: String -> String -> String
-(++\) l r = l ++ "\n" ++ r
-
-preamble :: String -> String
-preamble moduleName =
-  "module " ++ moduleName ++ " where" ++\
-  "import Data.Vector.Unboxed as V  " ++\
-  "import Unsafe.Coerce             " ++\
-  "import GHC.Prim (Any)            "
-
-evalIO :: AST a -> IO a
-evalIO op = do
+evalIO :: Typeable a => AST a -> IO a
+evalIO ast = do
   (pluginPath, h, moduleName) <- openTempModuleFile
   let entryFnName  = "entry" ++ moduleName
-      (code, args) = pluginCode op moduleName entryFnName
+  (code, args) <- pluginCode ast moduleName entryFnName
   dump code h
   pluginEntry <- compileAndLoad pluginPath moduleName entryFnName
   let result = pluginEntry args
-  return $ uc result
+  return $ fromJust $ fromDynamic result
 {-# NOINLINE evalIO #-}
 
 dump :: String -> Handle -> IO ()
@@ -292,7 +431,14 @@ loadSourceGhc path = let
 -------------- Tests -------------------------
 fl = Data.LiveFusion.Combinators.fromList
 
-runTests = mapM_ (print . eval) [test1, testMap1, testFilt1, testZipWith1, testMap2, testZipWith2, testZip1]
+--main = mapM_ (print . eval) [test1, testMap1, testFilt1, testZipWith1, testMap2, testZipWith2, testZip1]
+
+runTests = do
+  let runTest = print . eval
+  runTest testMap1
+  runTest manymaps
+  runTest testShare
+  runTest testMZW
 
 test1 :: ArrayAST Int
 test1 = zipWith (*) (map (+1) $ fl [1,2,3,4,5,6,7,8]) (zipWith (+) (filter (<0) $ fl $ take 20 [-8,-7..]) (map (\x->x*2+1) $ fl [1..8]))
@@ -318,3 +464,17 @@ testZip1 = map (uncurry (*)) $ zip testMap2 testZipWith1
 testShare :: ArrayAST Int
 testShare = zipWith (+) (map (+1) arr) (map (+2) arr)
   where arr = fl [1,2,3]
+
+manymaps :: ArrayAST Int
+manymaps = map (+1) $ map (+2) $ map (+3) $ fl [1,2,3]
+
+testMZW :: ArrayAST (Int,Double)
+testMZW = zipWith k (zipWith g xs fys) (zipWith h fys zs)
+  where k = (\l r -> (l+r,1.0))
+        g = (*)
+        h = max
+        f = (+1)
+        fys = map f ys
+        xs = fl [1,2,3]
+        ys = fl [4,5,6]
+        zs = fl [7,8,9]
