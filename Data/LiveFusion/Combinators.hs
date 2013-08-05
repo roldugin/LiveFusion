@@ -1,5 +1,8 @@
-{-# LANGUAGE GADTs, OverloadedStrings, ScopedTypeVariables, TypeFamilies, RankNTypes, FlexibleInstances, StandaloneDeriving, DeriveDataTypeable, FlexibleContexts, NoMonomorphismRestriction, TypeOperators #-}
+{-# LANGUAGE GADTs, OverloadedStrings, ScopedTypeVariables, TypeFamilies, RankNTypes, FlexibleInstances, StandaloneDeriving, DeriveDataTypeable, FlexibleContexts, NoMonomorphismRestriction, TypeOperators, NamedFieldPuns #-}
 module Data.LiveFusion.Combinators where
+
+import Data.LiveFusion.Loop as Loop
+import Data.LiveFusion.Util
 
 import qualified Data.Vector.Unboxed as V
 import Prelude hiding ( map, zip, filter, zipWith )
@@ -24,15 +27,13 @@ import Text.Show.Functions
 import Data.Maybe
 import Data.List as List ( union )
 import Data.Dynamic
-import Text.Printf
+
 
 tr a = trace (show a) a
 
 uc = unsafeCoerce
 
 ucText = "unsafeCoerce"
-
-type Arg = Dynamic
 
 class (Show a, V.Unbox a, Typeable a) => Elt a
 
@@ -43,8 +44,6 @@ instance Elt Bool
 instance (Elt a, Elt b) => Elt (a,b)
 
 type ArrayAST a = AST (V.Vector a)
-
-type Name = Unique
 
 data AST e where
   Map     :: (Elt a, Elt b) => (a -> b) -> ArrayAST a -> ArrayAST b
@@ -100,87 +99,42 @@ recoverSharing e = do
   return (m, n, getVar m n)
 {-# NOINLINE recoverSharing #-}
 
-var :: Name -> String
-var n = "var" ++ (show n)
-
-arg :: Name -> String
-arg n = "arg" ++ (show n)
-
-res :: Name -> String
-res n = "res" ++ (show n)
-
--- A really ugly and error-prome loop representation
-data Loop = Loop (Map Name Arg)  {- Arguments -}
-                 (Map Name Expr) {- Bindings -}
-                 [Name] {- Arrays to iterate -}
-                 Int {- Minimum array length -} -- TODO not a great way to do it
-
-instance Show Loop where
-  show (Loop args binds arrs len)
-    = "Loop (Args:  " ++ (show $ P.map arg $ Map.keys args) ++ ")\n" ++
-      "     (Binds: " ++ show binds ++ ")\n" ++
-      "     (Arrs:  " ++ (show $ P.map var $ arrs) ++ ")"
-
-addArg name arg (Loop args binds arrs len) = Loop (insert name arg args) binds arrs len
-
-addBind name expr (Loop args binds arrs len) = Loop args (insert name expr binds) arrs len
-
-addVec name (Loop args binds arrs len) = Loop args binds (name:arrs) len
-
-setLen n (Loop args binds arrs len) | len == 0   = Loop args binds arrs n
-                                    | otherwise = Loop args binds arrs (n `min` len)
-
-loopUnion (Loop args1 binds1 arrs1 len1) (Loop args2 binds2 arrs2 len2)
-  = Loop (args1 `Map.union` args2) (binds1 `Map.union` binds2) (arrs1 `List.union` arrs2) (len1 `min` len2)
-
-emptyLoop = Loop Map.empty Map.empty [] 0
-
-{-
-data VarArg e where
-  VarE :: forall e . (Elt e) => Name -> VarArg e
-  ArgE :: forall e . (Elt e) => Name -> VarArg e
-
-data Expr e where
-  App1 :: (Elt a, Elt b) => VarArg (a -> b) -> VarArg a -> Expr b
-  App2 :: (Elt a, Elt b, Elt c) => VarArg (a -> b -> c) -> VarArg a -> VarArg b -> Expr c
--}
-data VarArg where
-  VarE :: Name -> VarArg
-  ArgE :: Name -> VarArg
-  deriving Show
-
-data Expr where
-  App1 :: VarArg -> VarArg -> Expr
-  App2 :: VarArg -> VarArg -> VarArg -> Expr
-  deriving Show
-
 
 fuse :: Typeable e => Map Name (WrappedAST Name) -> (AST2 e Name) -> Name -> (Name, Loop, Name)
 fuse env = fuse'
   where
     fuse' :: Typeable e => (AST2 e Name) -> Name -> (Name, Loop, Name)
-    fuse' var@(Var name) _ = let ast = fromJust $ (getVar env name) `asTypeOf` (Just var)
-                             in  fuse' ast name
-    fuse' (Map2 f arr) name = let (arr_name, arr_loop, arr_res) = fuse' arr name -- TODO: this name means nothing
-                                  loop = addArg name (toDyn f)
-                                       $ addBind name (App1 (ArgE name) (VarE arr_res))
-                                       $ arr_loop
-                              in  (name, loop, name)
-    fuse' (ZipWith2 f arr brr) name = let (arr_name, arr_loop, arr_res) = fuse' arr name
-                                          (brr_name, brr_loop, brr_res) = fuse' brr name
-                                          abrr_loop = arr_loop `loopUnion` brr_loop
-                                          loop = addArg name (toDyn f)
-                                               $ addBind name (App2 (ArgE name) (VarE arr_res) (VarE brr_res))
-                                               $ abrr_loop
-                                      in  (name, loop, name)
-    fuse' (ArrLit2 vec) name = let loop = setLen (V.length vec)
-                                        $ addArg name (toDyn vec)
-                                        $ addVec name
-                                        $ emptyLoop
-                               in  (name, loop, name)
+    fuse' var@(Var name) _
+        = let ast = fromJust
+                  $ (getVar env name) `asTypeOf` (Just var)
+         in  fuse' ast name
+    fuse' (Map2 f arr) name
+        = let (arr_name, arr_loop, arr_res) = fuse' arr name -- TODO: this name means nothing
+              loop = addArg name (toDyn f)
+                   $ addBind name (App1 (ArgE name) (VarE arr_res))
+                   $ arr_loop
+          in  (name, loop, name)
+    fuse' (ZipWith2 f arr brr) name
+        = let (arr_name, arr_loop, arr_res) = fuse' arr name
+              (brr_name, brr_loop, brr_res) = fuse' brr name
+              abrr_loop = arr_loop `Loop.append` brr_loop
+              loop = addArg name (toDyn f)
+                   $ addBind name (App2 (ArgE name) (VarE arr_res) (VarE brr_res))
+                   $ abrr_loop
+          in  (name, loop, name)
+    fuse' (Filter2 p arr) name
+        = let (arr_name, arr_loop, arr_res) = fuse' arr name
+              loop = addArg name (toDyn p)
+                   $ addGuard (App1 (ArgE name) (VarE arr_res))
+                   $ arr_loop
+          in  (name, loop, name)
+    fuse' (ArrLit2 vec) name
+        = let loop = setLen (V.length vec)
+                   $ addArg name (toDyn vec)
+                   $ addVec name
+                   $ Loop.empty
+          in  (name, loop, name)
 
-
-(++:\) str1 str2 = str1 ++ ";\n" ++ str2
 
 
 pluginCode :: Typeable e => AST e -> String -> String -> IO (String, [Arg])
@@ -196,34 +150,26 @@ justCode :: Typeable e => AST e -> IO ()
 justCode ast = putStrLn =<< indexed <$> fst <$> pluginCode ast "Plugin" "pluginEntry"
 
 pluginEntryCode :: Typeable a => String -> AST2 a Name -> Name -> Loop -> (String, [Arg])
-pluginEntryCode entryFnName ast rootName loop@(Loop args _ _ _)
+pluginEntryCode entryFnName ast rootName loop
   = let code = entryFnName ++ " :: [Dynamic] -> Dynamic" ++\
                entryFnName `space` argsMatch ++\
                "  = toDyn $ runST $ loopST " ++ argsPass ++\
                " " ++\
                lSTCode
-    in  (code, Map.elems args)
+    in  (code, Map.elems arguments)
   where
+    arguments = args loop
     lSTCode   = loopSTCode (typeOf $ resultType ast) rootName loop
     argsMatch = showStringList $ P.map arg argNames   -- "[arg1, arg2, ...]"
     argsPass  = juxtMap coerceArg argNames  -- "(fd arg1) (fd arg2) ... "
     coerceArg = paren . ("fd "++) . arg      -- "(fd arg1)"
-    argNames  = Map.keys args
+    argNames  = Map.keys arguments
     resultType :: t a b -> a
     resultType _ = undefined
 
-showStringList :: [String] -> String
-showStringList = brackets . P.intercalate ", "
-  where brackets s = "[" ++ s ++ "]"
-
-intercalateMap :: String -> (a -> String) -> [a] -> String
-intercalateMap sep f = P.intercalate sep . P.map f
-
-juxtMap :: (a -> String) -> [a] -> String
-juxtMap f = intercalateMap " " f
 
 loopSTCode :: TypeRep -> Name -> Loop -> String
-loopSTCode resultTy rootName (Loop args binds arrs len)
+loopSTCode resultTy rootName (Loop args binds guards arrs len)
   = "loopST :: " ++ argsTypes ++ " -> ST s " ++ (paren $ show resultTy) ++\
     "loopST " ++ argsList ++ " =" ++\
     "  do {" ++\
@@ -251,16 +197,6 @@ loopSTCode resultTy rootName (Loop args binds arrs len)
              $ takesCode arrs ++ bindsCode binds
     -- reads elements from the arrays
 
-indent :: Int -> String -> String
-indent n = unlines . P.map (P.replicate (n*2) ' ' ++) . lines
-
-indexed :: String -> String
-indexed = unlines . indexed' . lines
-  where
-    indexed' :: [String] -> [String]
-    indexed' = P.zipWith space
-                         (P.map linum [1..])
-    linum (i::Int) = printf "%2d" i
 
 
 takesCode :: [Name] -> [String]
@@ -280,10 +216,6 @@ bindsCode = P.map bindCode . Map.toList
     vargCode (VarE name) = var name
     vargCode (ArgE name) = arg name
 
-space str1 str2 = str1 ++ " " ++ str2
-
-paren :: String -> String
-paren s = "(" ++ s ++ ")"
 
 pprArg :: Int -> String
 pprArg ix = "arg" ++ (show ix)
@@ -294,9 +226,6 @@ pprUCArg ix a = ("unsafeCoerce " ++ (pprArg ix)) `pprAsTy` a
 pprAsTy :: Typeable a => String -> a -> String
 pprAsTy var a = paren $ var ++ " :: " ++ (show $ typeOf a)
 
-infixr 5  ++\
-(++\) :: String -> String -> String
-(++\) l r = l ++ "\n" ++ r
 
 preamble :: String -> String
 preamble moduleName =
