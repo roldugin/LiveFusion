@@ -8,7 +8,7 @@ module Data.LiveFusion.Loop where
 import Data.LiveFusion.Util
 
 import Data.Map as Map hiding ( map )
-import Data.Reify ( Unique ) -- TODO remove this import
+import Data.Reify ( Unique ) -- TODO remove coupling with data-reify
 import Data.Dynamic
 import Data.List as List
 import Data.Monoid
@@ -28,10 +28,10 @@ data Loop = Loop { args   :: (Map Name Arg)  {- Arguments -}
 
 instance Show Loop where
   show (Loop args binds guards arrs len)
-    = "Loop (Args:   " ++ (show $ map arg $ Map.keys args) ++ ")" ++\
-      "     (Binds:  " ++ show binds ++ ")" ++\
-      "     (Guards: " ++ show guards ++ ")" ++\
-      "     (Arrs:   " ++ (show $ map var $ arrs) ++ ")"
+    = "Loop Args:   " ++ (show $ map (pprVarArg . ArgE) $ Map.keys args) ++\
+      "     Binds:  " ++ show binds  ++\
+      "     Guards: " ++ show guards ++\
+      "     Arrs:   " ++ (show $ map (pprVarArg . VarE) $ arrs)
 
 
 addArg name arg loop = loop { args = args' }
@@ -80,14 +80,6 @@ empty :: Loop
 empty = mempty
 
 
-var :: Name -> String
-var n = "var" ++ (show n)
-
-
-arg :: Name -> String
-arg n = "arg" ++ (show n)
-
-
 data VarArg where
   VarE :: Name -> VarArg
   ArgE :: Name -> VarArg
@@ -97,6 +89,27 @@ data Expr where
   App1 :: VarArg -> VarArg -> Expr
   App2 :: VarArg -> VarArg -> VarArg -> Expr
   deriving Show
+
+
+pprVarArg :: VarArg -> String
+pprVarArg (VarE n) = "var" ++ show n
+pprVarArg (ArgE n) = "arg" ++ show n
+
+
+pprExpr :: Expr -> String
+pprExpr (App1 f x)   = pprVarArg f `space` pprVarArg x
+pprExpr (App2 f x y) = pprVarArg f `space` pprVarArg x
+                                   `space` pprVarArg y
+
+
+-- TODO these two should go as soon as we stop passing Names around
+-- and pass VarArgs directly
+pprVar :: Name -> String
+pprVar = pprVarArg . VarE
+
+pprArg :: Name -> String
+pprArg = pprVarArg . ArgE
+
 
 {- Typed variables, arguments and expressions
 data VarArg e where

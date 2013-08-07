@@ -11,7 +11,7 @@ import Unsafe.Coerce
 import GHC.Prim (Any)
 import qualified Data.List as P
 import Data.Typeable
-import GHC hiding ( Name )
+import GHC hiding ( Name, pprExpr ) -- TODO instead import what's needed
 import GHC.Paths -- ( libdir )
 import DynFlags -- ( defaultFatalMessager, defaultFlushOut )
 import Control.Exception
@@ -127,7 +127,7 @@ fuse env = fuse'
               loop = addArg name (toDyn p)
                    $ addGuard (App1 (ArgE name) (VarE arr_res))
                    $ arr_loop
-          in  (name, loop, name)
+          in  (name, loop, arr_res) -- Reuse result of arr
     fuse' (ArrLit2 vec) name
         = let loop = setLen (V.length vec)
                    $ addArg name (toDyn vec)
@@ -140,8 +140,8 @@ fuse env = fuse'
 pluginCode :: Typeable e => AST e -> String -> String -> IO (String, [Arg])
 pluginCode ast moduleName entryFnName = do
   (env, rootName, Just rootNode) <- recoverSharing ast
-  let (_, loop, _) = fuse env rootNode rootName
-      (bodyCode, args) = pluginEntryCode entryFnName rootNode rootName loop
+  let (_, loop, resultName) = fuse env rootNode rootName
+      (bodyCode, args) = pluginEntryCode entryFnName rootNode rootName resultName loop
       code = preamble moduleName ++\ bodyCode
   return (code, args)
 
@@ -149,8 +149,9 @@ pluginCode ast moduleName entryFnName = do
 justCode :: Typeable e => AST e -> IO ()
 justCode ast = putStrLn =<< indexed <$> fst <$> pluginCode ast "Plugin" "pluginEntry"
 
-pluginEntryCode :: Typeable a => String -> AST2 a Name -> Name -> Loop -> (String, [Arg])
-pluginEntryCode entryFnName ast rootName loop
+-- TODO Clean up argument list
+pluginEntryCode :: Typeable a => String -> AST2 a Name -> Name -> Name -> Loop -> (String, [Arg])
+pluginEntryCode entryFnName ast rootName resultName loop
   = let code = entryFnName ++ " :: [Dynamic] -> Dynamic" ++\
                entryFnName `space` argsMatch ++\
                "  = toDyn $ runST $ loopST " ++ argsPass ++\
@@ -159,66 +160,90 @@ pluginEntryCode entryFnName ast rootName loop
     in  (code, Map.elems arguments)
   where
     arguments = args loop
-    lSTCode   = loopSTCode (typeOf $ resultType ast) rootName loop
-    argsMatch = showStringList $ P.map arg argNames   -- "[arg1, arg2, ...]"
+    lSTCode   = loopSTCode (typeOf $ resultType ast) resultName loop
+    argsMatch = showStringList $ P.map pprArg argNames   -- "[arg1, arg2, ...]"
     argsPass  = juxtMap coerceArg argNames  -- "(fd arg1) (fd arg2) ... "
-    coerceArg = paren . ("fd "++) . arg      -- "(fd arg1)"
+    coerceArg = paren . ("fd "++) . pprArg      -- "(fd arg1)"
     argNames  = Map.keys arguments
     resultType :: t a b -> a
     resultType _ = undefined
 
 
 loopSTCode :: TypeRep -> Name -> Loop -> String
-loopSTCode resultTy rootName (Loop args binds guards arrs len)
+loopSTCode resultTy resultName (Loop args binds guards arrs len)
   = "loopST :: " ++ argsTypes ++ " -> ST s " ++ (paren $ show resultTy) ++\
-    "loopST " ++ argsList ++ " =" ++\
-    "  do {" ++\
-    "    dst <- MV.new n" ++:\
-    "    loop dst 0" ++:\
-    "    dst' <- V.unsafeFreeze dst" ++:\
-    "    return dst' }" ++\
+    "loopST " ++ argsList ++ " ="     ++\
+    "  do {"                          ++\
+    "    dst  <- MV.new n"            ++:\  -- allocate an array of same size as the smallest input array
+    "    len  <- loop dst 0 0"        ++:\  -- perform the traversal
+    "    let { dst2 = MV.unsafeTake len dst }" ++:\  -- only take the filled portion of the result array
+    "    dst3 <- V.unsafeFreeze dst2" ++:\  -- turn mutable array into immutable w/out copying
+    "    return dst3 }" ++\
     "  where {" ++\
     "    n = " ++ (show len) ++:\
-    "    loop dst i = case i < n of {" ++\
+    "    loop dst i o = case i < n of {" ++\
     "      True  -> " ++\
     "        let { " ++\ indent 5 letsCode ++
-    "        } in do {" ++\
-    "          MV.unsafeWrite dst i " ++ (var rootName) ++:\
-    "          loop dst (i+1)" ++\
+    "        } in " ++\
+    "        do {" ++\
+    "          guards" ++\
     "        }" ++:\
-    "      False -> return () }}"
+    "      False -> return o }}"
   where
     (argNames, argVals) = P.unzip $ Map.toList args
-    argsTypes = P.intercalate " -> "
-              $ P.map (paren . show . dynTypeRep) argVals
-    argsList  = P.intercalate " "
-              $ P.map arg argNames
-    letsCode = P.intercalate ";\n"
-             $ takesCode arrs ++ bindsCode binds
-    -- reads elements from the arrays
+    argsTypes   = P.intercalate " -> "
+                $ P.map (paren . show . dynTypeRep) argVals
+    argsList    = P.intercalate " "
+                $ P.map pprArg argNames
+    letsCode    = P.intercalate ";\n"
+                $ P.concat [ takesCode arrs
+                           , bindsCode binds
+                           , guardsCode guards
+                           , [skipCode]
+                           , [yieldCode resultName]
+                           ]
+    guardsCode' = guardsCode guards
 
+skipCode :: String
+skipCode
+  = "skip = loop dst (i+1) o"
+
+yieldCode :: Name -> String
+yieldCode resultName
+  = "yield = do {" ++\
+    "  MV.unsafeWrite dst o " ++ pprVar resultName ++:\
+    "  loop dst (i+1) (o+1) }"
+
+guardsCode :: [Expr] -> [String]
+guardsCode guards
+  = let (codes, first) = guardsCode' 1 guards
+        entry = "guards = " ++ first -- `guard = yield' in case of no guards
+    in  entry:codes
+  where
+    guardsCode' _ [] = ([], "yield")
+    guardsCode' n (p:ps)
+      = let (codes, cont) = guardsCode' (n+1) ps
+            label = "guard" ++ show n
+            code  = guardCode label p cont
+        in  (code:codes, label)
+    guardCode label predicate cont
+      = label ++ " = case " ++ pprExpr predicate ++ " of " ++
+                 "{ False -> skip; True -> " ++ cont ++ " }"
 
 
 takesCode :: [Name] -> [String]
 takesCode = P.map takeCode
   where
-    takeCode name = (var name) ++ " = V.unsafeIndex " ++ (arg name) `space` "i" -- TODO horrible
+    takeCode name = (pprVar name) ++ " = V.unsafeIndex " ++ (pprArg name) `space` "i" -- TODO horrible
+
 
 bindsCode :: (Map Name Expr) -> [String]
 bindsCode = P.map bindCode . Map.toList
   where
     bindCode (name, expr) = (lhs name) ++ " = " ++ (rhs expr)
-    lhs = var
-    rhs (App1 fun arg)       = (vargCode fun)  `space` (vargCode arg)
-    rhs (App2 fun arg1 arg2) = (vargCode fun)  `space`
-                               (vargCode arg1) `space`
-                               (vargCode arg2)
-    vargCode (VarE name) = var name
-    vargCode (ArgE name) = arg name
+    lhs = pprVarArg . VarE
+    rhs = pprExpr
 
-
-pprArg :: Int -> String
-pprArg ix = "arg" ++ (show ix)
 
 pprUCArg :: Typeable a => Int -> a -> String
 pprUCArg ix a = ("unsafeCoerce " ++ (pprArg ix)) `pprAsTy` a
@@ -360,13 +385,10 @@ loadSourceGhc path = let
 -------------- Tests -------------------------
 fl = Data.LiveFusion.Combinators.fromList
 
---main = mapM_ (print . eval) [test1, testMap1, testFilt1, testZipWith1, testMap2, testZipWith2, testZip1]
-
 runTests = do
   let runTest = print . eval
-  runTest testMap1
-  runTest manymaps
-  runTest testShare
+  mapM_ runTest [ test1, testMap1, testFilt1, testZipWith1, testMap2
+                , testZipWith2, {- testZip1, -} testShare, testManyMaps]
   runTest testMZW
 
 test1 :: ArrayAST Int
@@ -394,8 +416,8 @@ testShare :: ArrayAST Int
 testShare = zipWith (+) (map (+1) arr) (map (+2) arr)
   where arr = fl [1,2,3]
 
-manymaps :: ArrayAST Int
-manymaps = map (+1) $ map (+2) $ map (+3) $ fl [1,2,3]
+testManyMaps :: ArrayAST Int
+testManyMaps = map (+1) $ map (+2) $ map (+3) $ fl [1,2,3]
 
 testMZW :: ArrayAST (Int,Double)
 testMZW = zipWith k (zipWith g xs fys) (zipWith h fys zs)
