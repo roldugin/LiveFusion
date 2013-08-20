@@ -8,46 +8,64 @@ module Data.LiveFusion.Loop where
 import Data.LiveFusion.Util
 
 import Data.Map as Map hiding ( map )
-import Data.Reify ( Unique ) -- TODO remove coupling with data-reify
 import Data.Dynamic
 import Data.List as List
 import Data.Monoid
 
-type Name = Unique
-type Arg  = Dynamic
-
+type Name  = String
+type Arg   = Dynamic
+type State = ( Var   -- Variable name
+             , Expr  -- Initial value
+             , Expr  -- Update at the end of each iteration
+             )
 
 -- A really ugly and error-prome loop representation
-data Loop = Loop { args   :: (Map Name Arg)  {- Arguments -}
-                 , binds  :: (Map Name Expr) {- Bindings -}
-                 , guards :: [Expr]          {- Ordered guards -}
-                 , arrs   :: [Name]          {- Arrays to iterate -}
-                 , len    :: Int             {- Minimum array length -} -- TODO not a great way to do it
+data Loop = Loop { -- | Global arguments and their values
+                   args   :: (Map Var Arg)
+
+                   -- | Mutable state
+                 , state  :: [State]
+
+                   -- | Loop-local binding
+                 , binds  :: (Map Var Expr)
+
+                   -- | Ordered guards (TODO: The Var is really a Label here)
+                 , guards :: [(Expr,Var)]
+
+                   -- | Minimal array length (TODO bad)
+                 , len    :: Int
                  }
 
 
 instance Show Loop where
-  show (Loop args binds guards arrs len)
-    = "Loop Args:   " ++ (show $ map (pprVarArg . ArgE) $ Map.keys args) ++\
+  show (Loop args state binds guards len)
+    = "Loop Args:   " ++ (show $ map pprVar $ Map.keys args) ++\
+      "     State:  " ++ show state ++\
       "     Binds:  " ++ show binds  ++\
-      "     Guards: " ++ show guards ++\
-      "     Arrs:   " ++ (show $ map (pprVarArg . VarE) $ arrs)
+      "     Guards: " ++ show guards
 
 
-addArg name arg loop = loop { args = args' }
-  where args' = Map.insert name arg (args loop)
+addArg var arg loop = loop { args = args' }
+  where args' = Map.insert var arg (args loop)
 
 
-addBind name expr loop = loop { binds = binds' }
-  where binds' = Map.insert name expr (binds loop)
+addState var init update loop = loop { state = state' }
+  where state' = (var,init,update):(state loop)
 
 
-addGuard expr loop = loop { guards = guards' }
-  where guards' = expr:(guards loop)
+addBind var expr loop = loop { binds = binds' }
+  where binds' = Map.insert var expr (binds loop)
 
 
-addVec name loop = loop { arrs = arrs' }
-  where arrs' = name:(arrs loop)
+-- Guard which causes the end of loop on failure (like break)
+addExitGuard cond = addGuard cond (Var "done") -- TODO: add a common set of labels
+
+-- Guard which skips iteration on failure (like continue)
+addSkipGuard cond = addGuard cond (Var "skip")
+
+-- A guard with the specified condition and the failure label
+addGuard cond onfail loop = loop { guards = guards' }
+  where guards' = (guards loop) `List.union` [(cond, onfail)] -- guards are ordered
 
 
 setLen n loop = loop { len = len' }
@@ -57,12 +75,12 @@ setLen n loop = loop { len = len' }
 
 
 instance Monoid Loop where
-  mempty = Loop Map.empty Map.empty [] [] 0
+  mempty = Loop Map.empty [] Map.empty [] 0
   mappend loop1 loop2
     = Loop { args   = args   `joinBy` Map.union
+           , state  = state  `joinBy` List.union
            , binds  = binds  `joinBy` Map.union
-           , guards = guards `joinBy` (++)
-           , arrs   = arrs   `joinBy` List.union
+           , guards = guards `joinBy` List.union
            , len    = len    `joinBy` min
            }
     where
@@ -80,43 +98,50 @@ empty :: Loop
 empty = mempty
 
 
-data VarArg where
-  VarE :: Name -> VarArg
-  ArgE :: Name -> VarArg
-  deriving Show
+data Var = Var Name
+  deriving ( Show, Eq, Ord )
 
+
+-- | Represents an expression in the loop.
+--
+--   NOTE: It would be difficult to type the expression tree as `Expr a'
+--         as we would no longer be able to easily construct collections
+--         of such expressions, e.g.:
+--   > [Expr Int, Expr Double, Expr Double]
+--
+--   Thoughts:
+--   1. One way to keep the types would be to keep a TypeRep inside each Var.
+--
+--   2. Alternatively we could minimise the use of data structures such as lists
+--   and maps and instead keep more stuff in the tree itself.
 data Expr where
-  App1 :: VarArg -> VarArg -> Expr
-  App2 :: VarArg -> VarArg -> VarArg -> Expr
-  deriving Show
-
-
-pprVarArg :: VarArg -> String
-pprVarArg (VarE n) = "var" ++ show n
-pprVarArg (ArgE n) = "arg" ++ show n
+  VarE   :: Var -> Expr
+  App1   :: Var -> Var -> Expr
+  App2   :: Var -> Var -> Var -> Expr
+  App3   :: Var -> Var -> Var -> Var -> Expr
+  IntLit :: Int -> Expr
+  deriving ( Show, Eq )
 
 
 pprExpr :: Expr -> String
-pprExpr (App1 f x)   = pprVarArg f `space` pprVarArg x
-pprExpr (App2 f x y) = pprVarArg f `space` pprVarArg x
-                                   `space` pprVarArg y
+pprExpr (App1 f x)
+    = pprVar f `space` pprVar x
+pprExpr (App2 f x y)
+    = pprVar f `space` pprVar x `space` pprVar y
+pprExpr (App3 f x y z)
+    = pprVar f `space` pprVar x `space`
+      pprVar y `space` pprVar z
+pprExpr (IntLit i) = show i
 
 
--- TODO these two should go as soon as we stop passing Names around
--- and pass VarArgs directly
-pprVar :: Name -> String
-pprVar = pprVarArg . VarE
-
-pprArg :: Name -> String
-pprArg = pprVarArg . ArgE
+pprName :: Name -> String
+pprName = id
 
 
-{- Typed variables, arguments and expressions
-data VarArg e where
-  VarE :: forall e . (Elt e) => Name -> VarArg e
-  ArgE :: forall e . (Elt e) => Name -> VarArg e
+pprVar :: Var -> String
+pprVar (Var name) = pprName name
 
-data Expr e where
-  App1 :: (Elt a, Elt b) => VarArg (a -> b) -> VarArg a -> Expr b
-  App2 :: (Elt a, Elt b, Elt c) => VarArg (a -> b -> c) -> VarArg a -> VarArg b -> Expr c
--}
+
+-- | Create a new variable from a the given one
+prime :: Var -> Var
+prime (Var name) = Var $ name ++ "'"
