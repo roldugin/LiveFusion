@@ -3,7 +3,7 @@ module Data.LiveFusion.Combinators where
 
 import Data.LiveFusion.Loop as Loop
 import Data.LiveFusion.Util
-import Data.LiveFusion.HsCodeGen
+--import Data.LiveFusion.HsCodeGen
 
 import qualified Data.Vector.Unboxed as V
 import Prelude hiding ( map, zip, filter, zipWith )
@@ -28,7 +28,7 @@ import Text.Show.Functions
 import Data.Maybe
 import Data.List as List ( union )
 import Data.Dynamic
-
+import Control.Arrow ( (>>>) )
 
 tr a = trace (show a) a
 
@@ -105,69 +105,124 @@ recoverSharing e = do
 {-# NOINLINE recoverSharing #-}
 
 
-fuse :: Typeable e => Map Unique (WrappedAST Unique) -> (AST2 e Unique) -> Unique -> (Loop, Var)
+fuse :: Typeable e => Map Unique (WrappedAST Unique) -> (AST2 e Unique) -> Unique -> (Loop, Unique)
 fuse env = fuse'
   where
-    fuse' :: Typeable e => (AST2 e Unique) -> Unique -> (Loop, Var)
+    fuse' :: Typeable e => (AST2 e Unique) -> Unique -> (Loop, Unique)
+    -- TODO: Unique id argument is essentially threaded through, can we abstract?
     fuse' var@(Var2 uq) _
         = let ast = fromJust
                   $ (getASTNode env uq) `asTypeOf` (Just var)
           in  fuse' ast uq
+    fuse' (ArrLit2 vec) uq
+        = let arrVar   = var "arr" uq
+              -- BODY
+              aVar     = eltVar uq                   -- result of every read
+              aBind    = bindStmt aVar (App2 readFn ixVar arrVar) -- read statement
+              bodyStmts = [aBind]
+              -- INIT
+              lenVar   = var "len" uq
+              lenBind  = bindStmt lenVar (App1 lengthFn arrVar)
+              ixVar    = indexVar uq                 -- index
+              ixInit   = bindStmt ixVar (IntLit 0)    -- index initialization
+              initStmts= [ixInit, lenBind]
+              -- BOTTOM
+              oneVar   = var "one" uq
+              oneBind  = bindStmt oneVar (IntLit 1)  -- index step
+              ixUpdate = assignStmt ixVar (App2 plusFn ixVar oneVar)
+              botStmts = [oneBind, ixUpdate]
+              -- GUARD
+              predVar  = var "pred" uq -- boolean guard predicate
+              predBind = bindStmt predVar (App2 ltFn ixVar lenVar)
+              ixGuard  = guardStmt predVar doneLbl
+              grdStmts = [predBind, ixGuard]
+              -- LOOP
+              loop     = addArg arrVar (toDyn vec)
+                       $ addStmts initStmts  initLbl
+                       $ addStmts grdStmts   guardLbl
+                       $ addStmts bodyStmts  bodyLbl
+                       $ addStmts botStmts   bottomLbl
+                       $ Loop.empty
+          in  (loop, uq) -- TODO return a result that maps an element of array
     fuse' (Map2 f arr) uq
-        = let (arr_loop, aVar) = fuse' arr uq -- TODO: this uq means nothing
-              bVar = var "map_x" uq
-              fVar = var "map_f" uq
+        = let (arr_loop, arr_uq) = fuse' arr uq -- TODO: this uq means nothing
+              aVar  = eltVar arr_uq         -- element of source array
+              -- BODY
+              fVar  = var "f" uq            -- name of function to apply
+              fApp  = App1 fVar aVar        -- function application
+              bVar  = eltVar uq             -- resulting element variable
+              bBind = bindStmt bVar fApp    -- bind result
+              bodyStmts = [bBind] -- body block is just assignment
+              -- LOOP
               loop = addArg fVar (toDyn f)
-                   $ addBind bVar (App1 fVar aVar)
+                   $ addStmts bodyStmts bodyLbl
                    $ arr_loop
-          in  (loop, bVar)
+          in  (loop, uq)
     fuse' (ZipWith2 f arr brr) uq
-        = let (arr_loop, aVar) = fuse' arr uq
-              (brr_loop, bVar) = fuse' brr uq
+        = let (arr_loop, aUq) = fuse' arr uq
+              (brr_loop, bUq) = fuse' brr uq
+              aVar = eltVar aUq
+              bVar = eltVar bUq
               abrr_loop = arr_loop `Loop.append` brr_loop
-              cVar = var "zipWith_x" uq
-              fVar = var "zipWith_f" uq
+              -- BODY
+              cVar = eltVar uq
+              fVar = var "f" uq
+              fApp = App2 fVar aVar bVar
+              cBind = bindStmt cVar fApp
+              bodyStmts = [cBind]
               loop = addArg fVar (toDyn f)
-                   $ addBind cVar (App2 fVar aVar bVar)
+                   $ addStmts bodyStmts bodyLbl
                    $ abrr_loop
-          in  (loop, cVar)
+          in  (loop, uq)
     fuse' (Filter2 p arr) uq
-        = let (arr_loop, aVar) = fuse' arr uq
-              pVar = var "filter_p" uq
+        = let (arr_loop, a_uq) = fuse' arr uq
+              aVar      = eltVar a_uq
+              -- BODY
+              pVar      = var "p" uq
+              pApp      = App1 pVar aVar
+              boolVar   = var "bool" uq
+              boolBind  = bindStmt boolVar pApp
+              guard     = guardStmt boolVar bottomLbl
+              resVar    = eltVar uq
+              resBind   = bindStmt resVar (VarE aVar)
+              -- NOTE: This will bug out if there are more guards
+              --       or anything else important in the remainder of the body
+              bodyStmts = [boolBind, guard, resBind]
+              -- LOOP
               loop = addArg pVar (toDyn p)
-                   $ addSkipGuard (App1 pVar aVar)
+                   $ addStmts bodyStmts bodyLbl
                    $ arr_loop
-          in  (loop, aVar) -- Reuse result of arr
+          in  (loop, uq)
+
     fuse' (Scan2 f z arr) uq
-        = let (arr_loop, aVar) = fuse' arr uq
-              fVar = var "scan_f" uq
-              zVar = var "scan_z" uq
+        = let (arr_loop, a_uq) = fuse' arr uq
+              aVar = eltVar a_uq
+              fVar = var "f" uq
+              zVar = var "z" uq
+              -- INIT
+              accVar    = var "acc" uq                -- accumulator
+              accInit   = bindStmt accVar (VarE zVar)  -- accum initialization
+              initStmts = [accInit]
+              -- BODY
+              bVar      = eltVar uq
+              bBind     = bindStmt bVar (VarE accVar) -- resulting element in current accum
+              bodyStmts = [bBind]
+              -- BOTTOM
+              fApp = App2 fVar accVar aVar
+              accUpdate = assignStmt accVar fApp
+              botStmts = [accUpdate]
+              -- LOOP
               loop = addArg fVar (toDyn f)
                    $ addArg zVar (toDyn z)
---                   $ addBind uq (App2 fVar aVar zVar)
---                   $ addLoopArg uq acc_uq
---                   $ addPost uq (App2 (Arg
+                   $ addStmts initStmts initLbl
+                   $ addStmts bodyStmts bodyLbl
+                   $ addStmts botStmts  bottomLbl
                    $ arr_loop
-          in  (loop, zVar)
-    fuse' (ArrLit2 vec) uq
-        = let arrVar = var "arr" uq
-              aVar   = var "arr_x" uq    -- result of every read
-              iVar   = Var "i"           -- index is a state variable
-              iInit  = App1 (Var "return") (Var "0") -- TODO: Ugly ugly ugly hack
-              iUpd   = incrExpr iVar
-              loop   = setLen (V.length vec)
-                     $ addArg arrVar (toDyn vec)
-                     $ addState iVar iInit iUpd
-                     $ addBind aVar (readArrayExpr arrVar iVar)
-                     $ addExitGuard (ltExpr iVar (Var "n")) -- TODO change `n' to something reasonable
-                     $ Loop.empty
-          in  (loop, aVar) -- TODO return a result that maps an element of array
+          in  (loop, uq)
 
 
-var :: String -> Unique -> Var
-var desc uq = Var $ desc ++ show uq
 
-
+{-
 pluginCode :: Typeable e => AST e -> String -> String -> IO (String, [Arg])
 pluginCode ast moduleName entryFnName = do
   (env, rootUq, Just rootNode) <- recoverSharing ast
@@ -179,6 +234,14 @@ pluginCode ast moduleName entryFnName = do
 
 justCode :: Typeable e => AST e -> IO ()
 justCode ast = putStrLn =<< indexed <$> fst <$> pluginCode ast "Plugin" "pluginEntry"
+-}
+
+fuseToLoop :: Typeable e => AST e -> IO Loop
+fuseToLoop ast = do
+  (env, rootUq, Just rootNode) <- recoverSharing ast
+  let (loop, resultUq) = fuse env rootNode rootUq
+  return loop
+
 
 resultType :: t a -> a
 resultType _ = undefined
@@ -207,15 +270,16 @@ zipWith f arr brr = ZipWith f arr brr
 zip :: (Elt a, Elt b) => ArrayAST a -> ArrayAST b -> AST (V.Vector (a,b))
 zip arr brr = Zip arr brr
 
-fold :: Elt a => (a -> a -> a) -> a -> ArrayAST a -> a
-fold f z arr = evalAST $ Fold f z arr
+--fold :: Elt a => (a -> a -> a) -> a -> ArrayAST a -> a
+--fold f z arr = evalAST $ Fold f z arr
 
-toList :: Elt a => ArrayAST a -> [a]
-toList = V.toList . eval
+--toList :: Elt a => ArrayAST a -> [a]
+--toList = V.toList . eval
 
 fromList :: Elt a => [a] -> ArrayAST a
 fromList = ArrLit . V.fromList
 
+{-
 eval :: Elt a => ArrayAST a -> V.Vector a
 eval (ArrLit vec) = vec
 eval op = evalAST op
@@ -237,13 +301,13 @@ evalIO ast = do
 
 dump :: String -> Handle -> IO ()
 dump code h = hPutStrLn h code >> hClose h
-
+-}
 openTempModuleFile :: IO (FilePath, Handle, String)
 openTempModuleFile = do
   (fp, h) <- openTempFile "/tmp/" "Plugin.hs" -- TODO: Make cross-platform
   let moduleName = takeBaseName fp
   return (fp, h, moduleName)
-
+{-
 compileAndLoad :: FilePath -> String -> String -> IO ([Arg] -> Arg)
 compileAndLoad hsFilePath moduleName entryFnName =
     defaultErrorHandler defaultFatalMessager defaultFlushOut $ do
@@ -260,7 +324,7 @@ compileAndLoad hsFilePath moduleName entryFnName =
             pluginEntry <- compileExpr (moduleName ++ "." ++ entryFnName)
             let pluginEntry' = unsafeCoerce pluginEntry :: [Arg] -> Arg
             return pluginEntry'
-
+-}
 {-
 execFnGhc :: String -> String -> HscEnv -> Ghc HValue
 execFnGhc modname fn ses = do
@@ -304,6 +368,14 @@ loadSourceGhc path = let
 -------------- Tests -------------------------
 fl = Data.LiveFusion.Combinators.fromList
 
+test0 :: ArrayAST Int
+test0 = ZipWith (+)
+        (fl [1,2,3])
+      $ Scan (+) 0 $ Filter (const True) $ Map (+1) $ fl [4,5,6]
+
+main = print =<< fuseToLoop test0
+
+{-
 runTests = do
   let runTest = print . eval
   mapM_ runTest [ test1, testMap1, testFilt1, testZipWith1, testMap2
@@ -348,3 +420,4 @@ testMZW = zipWith k (zipWith g xs fys) (zipWith h fys zs)
         xs = fl [1,2,3]
         ys = fl [4,5,6]
         zs = fl [7,8,9]
+-}

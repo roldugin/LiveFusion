@@ -14,7 +14,7 @@ Library
     Data.LiveFusion.Combinators
     Data.LiveFusion.Loop
     Data.LiveFusion.Util
-    Data.LiveFusion.HsCodeGen
+    --Data.LiveFusion.HsCodeGen
 
   Other-Modules:
 

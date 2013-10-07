@@ -12,81 +12,174 @@ import Data.Dynamic
 import Data.List as List
 import Data.Monoid
 
+type Id = Int
+
 type Name  = String
+
+data Var = IdVar Name Id
+         | SimplVar Name
+  deriving ( Show, Eq, Ord )
+
+var :: Name -> Id -> Var
+var = IdVar
+
+eltVar :: Id -> Var
+eltVar = var "elt"
+
+indexVar :: Id -> Var
+indexVar = var "ix"
+
+ltFn = SimplVar "(<)"
+plusFn = SimplVar "(+)"
+lengthFn = SimplVar "length"
+readFn = SimplVar "unsafeIndex"
+
 type Arg   = Dynamic
+
 type State = ( Var   -- Variable name
              , Expr  -- Initial value
              , Expr  -- Update at the end of each iteration
              )
 
--- A really ugly and error-prome loop representation
+data Block = Block Label [Stmt]
+
+type Label = String
+
+data Stmt = Bind Var Expr
+          | Assign Var Expr
+          | Case Var Label Label
+          | Guard Var Label
+          | Goto Label
+
+bindStmt = Bind
+assignStmt = Assign
+caseStmt = Case
+guardStmt = Guard
+gotoStmt = Goto
+
 data Loop = Loop { -- | Global arguments and their values
                    args   :: (Map Var Arg)
 
-                   -- | Mutable state
-                 , state  :: [State]
+                   -- | List of requested manifest arrays
+                 , out    :: [Var]
 
-                   -- | Loop-local binding
-                 , binds  :: (Map Var Expr)
-
-                   -- | Ordered guards (TODO: The Var is really a Label here)
-                 , guards :: [(Expr,Var)]
-
-                   -- | Minimal array length (TODO bad)
-                 , len    :: Int
+                   -- | List of goto code blocks
+                 , blocks :: BlockMap
                  }
 
+type BlockMap = Map Label Block
+
+updateBlock :: Label -> (Block -> Block) -> Loop -> Loop
+updateBlock lbl mut loop = putBlock block' loop
+  where
+    block  = getBlock lbl loop
+    block' = mut block
+
+getBlock :: Label -> Loop -> Block
+getBlock lbl loop = maybe emptyBlock id maybeBlock
+  where
+    blockMap = blocks loop
+    maybeBlock = Map.lookup lbl blockMap
+    emptyBlock = Block lbl []
+
+putBlock :: Block -> Loop -> Loop
+putBlock blk@(Block lbl _) loop = loop { blocks = blocks' }
+  where
+    blocks' = Map.insert lbl blk (blocks loop)
+
+addStmtsToBlock :: [Stmt] -> Block -> Block
+addStmtsToBlock stmts (Block lbl stmts0) = Block lbl (stmts0 ++ stmts)
+
+-- Append a statement to the specified code block
+addStmt :: Stmt -> Label -> Loop -> Loop
+addStmt stmt lbl = updateBlock lbl (addStmtsToBlock [stmt])
+
+addStmts :: [Stmt] -> Label -> Loop -> Loop
+addStmts stmts lbl = updateBlock lbl (addStmtsToBlock stmts)
+
+pprBlockMap :: BlockMap -> String
+pprBlockMap = concatMap pprBlock . elems
+
+pprBlock :: Block -> String
+pprBlock (Block lbl stmts)
+  = pprLabel lbl ++ ":" ++\
+    (indent 1 $ unlines $ map pprStmt stmts)
+
+pprStmt :: Stmt -> String
+pprStmt (Bind v e)     = "let " ++ pprVar v ++ " = " ++ pprExpr e
+pprStmt (Assign v e)   = pprVar v ++ " := " ++ pprExpr e
+pprStmt (Guard v l)    = "guard " ++ pprVar v ++ " onFail " ++ pprLabel l
+pprStmt (Case p l1 l2) = "if " ++ pprVar p ++
+                         " then " ++ pprLabel l1 ++
+                         " else " ++ pprLabel l2
+pprStmt (Goto l)       = "goto " ++ pprLabel l
+
+pprLabel :: Label -> String
+pprLabel = id
 
 instance Show Loop where
-  show (Loop args state binds guards len)
+  show (Loop args out blocks)
     = "Loop Args:   " ++ (show $ map pprVar $ Map.keys args) ++\
-      "     State:  " ++ show state ++\
-      "     Binds:  " ++ show binds  ++\
-      "     Guards: " ++ show guards
+      "     Out:    " ++ show out ++\
+      "     Blocks: " ++\ pprBlockMap blocks
 
 
 addArg var arg loop = loop { args = args' }
   where args' = Map.insert var arg (args loop)
 
 
-addState var init update loop = loop { state = state' }
-  where state' = (var,init,update):(state loop)
+addOut arrVar loop = loop { out = out' }
+  where out' = arrVar : (out loop)
 
 
-addBind var expr loop = loop { binds = binds' }
-  where binds' = Map.insert var expr (binds loop)
+-- | Several predefined labels
+initLbl :: Label
+initLbl = "init"
+
+guardLbl :: Label
+guardLbl = "guard"
+
+readLbl :: Label
+readLbl = "read"
+
+bodyLbl :: Label
+bodyLbl = "body"
+
+bottomLbl :: Label
+bottomLbl = "bottom"
+
+doneLbl :: Label
+doneLbl = "done"
 
 
 -- Guard which causes the end of loop on failure (like break)
-addExitGuard cond = addGuard cond (Var "done") -- TODO: add a common set of labels
+--addExitGuard cond = addGuard cond (Var "done") -- TODO: add a common set of labels
 
 -- Guard which skips iteration on failure (like continue)
-addSkipGuard cond = addGuard cond (Var "skip")
+--addSkipGuard cond = addGuard cond (Var "skip")
 
 -- A guard with the specified condition and the failure label
-addGuard cond onfail loop = loop { guards = guards' }
-  where guards' = (guards loop) `List.union` [(cond, onfail)] -- guards are ordered
+--addGuard cond onfail loop = loop { guards = guards' }
+--  where guards' = (guards loop) `List.union` [(cond, onfail)] -- guards are ordered
 
 
-setLen n loop = loop { len = len' }
-  where curr  = len loop
-        len'  | curr == 0  = n
-              | otherwise = n `min` curr
+--setLen n loop = loop { len = len' }
+--  where curr  = len loop
+--        len'  | curr == 0  = n
+--              | otherwise = n `min` curr
 
 
 instance Monoid Loop where
-  mempty = Loop Map.empty [] Map.empty [] 0
+  mempty = Loop Map.empty [] Map.empty
   mappend loop1 loop2
     = Loop { args   = args   `joinBy` Map.union
-           , state  = state  `joinBy` List.union
-           , binds  = binds  `joinBy` Map.union
-           , guards = guards `joinBy` List.union
-           , len    = len    `joinBy` min
+           , out    = out    `joinBy` List.union
+           , blocks = blocks `joinBy` Map.unionWith appendBlocks
            }
     where
-      joinBy :: (Loop  -> field)
-             -> (field -> field -> field)
-             -> field
+      joinBy :: (Loop  -> field)          -- field to take from loop
+             -> (field -> field -> field) -- joining function
+             -> field                    -- new field
       field `joinBy` f = f (field loop1) (field loop2)
 
 
@@ -98,9 +191,9 @@ empty :: Loop
 empty = mempty
 
 
-data Var = Var Name
-  deriving ( Show, Eq, Ord )
-
+appendBlocks :: Block -> Block -> Block
+appendBlocks (Block lbl stmts1) (Block _ stmts2)
+  = Block lbl (stmts1 ++ stmts2)
 
 -- | Represents an expression in the loop.
 --
@@ -124,14 +217,17 @@ data Expr where
 
 
 pprExpr :: Expr -> String
+pprExpr (VarE v)
+  = pprVar v
 pprExpr (App1 f x)
-    = pprVar f `space` pprVar x
+  = pprVar f `space` pprVar x
 pprExpr (App2 f x y)
-    = pprVar f `space` pprVar x `space` pprVar y
+  = pprVar f `space` pprVar x `space` pprVar y
 pprExpr (App3 f x y z)
-    = pprVar f `space` pprVar x `space`
-      pprVar y `space` pprVar z
-pprExpr (IntLit i) = show i
+  = pprVar f `space` pprVar x `space`
+    pprVar y `space` pprVar z
+pprExpr (IntLit i)
+  = show i
 
 
 pprName :: Name -> String
@@ -139,9 +235,12 @@ pprName = id
 
 
 pprVar :: Var -> String
-pprVar (Var name) = pprName name
+pprVar (IdVar name ident) = pprName name ++ "_" ++ pprId ident
+pprVar (SimplVar name) = pprName name
 
+pprId :: Id -> String
+pprId = show
 
 -- | Create a new variable from a the given one
-prime :: Var -> Var
-prime (Var name) = Var $ name ++ "'"
+--prime :: Var -> Var
+--prime (Var name ident) = Var $ name ++ "'"
