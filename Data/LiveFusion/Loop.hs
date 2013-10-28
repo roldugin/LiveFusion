@@ -36,11 +36,6 @@ readFn = SimplVar "unsafeIndex"
 
 type Arg   = Dynamic
 
-type State = ( Var   -- Variable name
-             , Expr  -- Initial value
-             , Expr  -- Update at the end of each iteration
-             )
-
 data Block = Block Label [Stmt]
 
 type Label = String

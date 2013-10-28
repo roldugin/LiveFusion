@@ -1,16 +1,154 @@
+{-# LANGUAGE TemplateHaskell #-}
+
 -- Source Haskell code generator.
 -- Most of the code is still in Combinators.hs but will migrate here SOON (c).
 
 module Data.LiveFusion.HsCodeGen where
 
 import Data.LiveFusion.Util
-import Data.LiveFusion.Loop
+import Data.LiveFusion.Loop as Lp
+
+import Language.Haskell.TH as TH
 
 import Data.Dynamic
-import Data.Map as Map hiding ( map, filter )
+import Data.Map ( Map )
+import qualified Data.Map as Map
 import Data.List
 
+type VarList = Map Var Bool -- Dirty flag means that a variable has been updates in the given block
 
+cgBlock :: VarList -> Block -> Dec
+cgBlock vars (Block lbl stmts) = FunD (mkName lbl) [Clause pats body []]
+  where
+    pats = map (BangP . VarP . thName) (Map.keys vars) -- this relies keys being in order
+    body = NormalB $ DoE thStmts
+    (vars', thStmts) = mapAccumL stmt (clearVars vars) stmts
+
+
+-- | Unsets dirty flag on al vars
+clearVars :: VarList -> VarList
+clearVars = Map.map (const False)
+
+-- | Generates a TH statement from a statement in our repr.
+--
+-- Along the way it populates a map of used variables and their update status.
+--
+-- It is suitable to be used as an accumulating function to mapAccumL.
+stmt :: VarList -> Lp.Stmt -> (VarList, TH.Stmt)
+stmt vars (Bind v e)
+  = let vars'  = insertFreshlyBound vars v
+        (vars'', thExpr) = expr vars' e
+        thVar  = VarP $ thName v
+        thStmt = LetS [ValD thVar (NormalB thExpr) [{-no where clause-}]]
+    in  (vars'', thStmt)
+stmt vars (Assign v e)
+  = let (vars', thExpr) = expr vars e
+        vars'' = markDirty vars' v      -- the order matters, since expr expects v to be clean
+                                        -- TODO: single update per block starts to sound like a bad idea now
+        thVar  = VarP $ thDirtyName v
+        thStmt = LetS [ValD thVar (NormalB thExpr) [{-no where clause-}]]
+    in  (vars'', thStmt)
+stmt vars (Case pred tLbl fLbl)
+  = let (vars', thPredExp) = expr vars (Lp.VarE pred)
+        thTExp = goto vars' tLbl
+        thFExp = goto vars' fLbl
+        thStmt = NoBindS $ CondE thPredExp thTExp thFExp
+    in  (vars', thStmt)
+stmt vars (Guard pred onFailLbl)
+  = let (vars', thPredExp) = expr vars (Lp.VarE pred)
+        thGotoExp = goto vars' onFailLbl
+        unlessFn = TH.VarE $ mkName "Control.Monad.unless"
+        thStmt = NoBindS $ TH.AppE (TH.AppE unlessFn thPredExp) thGotoExp
+    in  (vars', thStmt)
+stmt vars (Goto lbl)
+  = let thStmt  = NoBindS $ goto vars lbl
+    in  (vars, thStmt)
+
+goto :: VarList -> Label -> TH.Exp
+goto vars lbl = foldl TH.AppE fname args
+  where
+    fname = TH.VarE $ mkName lbl
+    args  = map TH.VarE
+          $ map toTHName
+          $ Map.toList vars
+
+    toTHName (v, False) = thName v
+    toTHName (v, True)  = thDirtyName v
+
+
+-- | Turn a Loop expression to a TH expression keeping an environment of seen variables.
+--
+-- TODO: This begs for an abstraction
+expr :: VarList -> Lp.Expr -> (VarList, TH.Exp)
+expr vars (Lp.VarE v)
+  = let vars' = insertCheckClean vars v
+        thExp = TH.VarE $ thName v
+    in  (vars', thExp)
+expr vars (Lp.App1 f v)
+  = let (vars1, th_f) = expr vars  $ Lp.VarE f
+        (vars2, th_v) = expr vars1 $ Lp.VarE v
+        thExp = TH.AppE th_f th_v
+    in  (vars2, thExp)
+expr vars (Lp.App2 f v1 v2)
+  = let (vars1, th_f)  = expr vars  $ Lp.VarE f
+        (vars2, th_v1) = expr vars1 $ Lp.VarE v1
+        (vars3, th_v2) = expr vars2 $ Lp.VarE v2
+        thExp = TH.AppE (TH.AppE th_f th_v1) th_v2
+    in  (vars3, thExp)
+expr vars (Lp.App3 f v1 v2 v3)
+  = let (vars1, th_f)  = expr vars  $ Lp.VarE f
+        (vars2, th_v1) = expr vars1 $ Lp.VarE v1
+        (vars3, th_v2) = expr vars2 $ Lp.VarE v2
+        (vars4, th_v3) = expr vars3 $ Lp.VarE v3
+        thExp = TH.AppE (TH.AppE (TH.AppE th_f th_v1) th_v2) th_v3
+    in  (vars3, thExp)
+expr vars (Lp.IntLit i)
+  = let thExp = TH.LitE $ TH.IntegerL $ toInteger i
+    in  (vars, thExp)
+
+
+thName :: Lp.Var -> TH.Name
+thName = TH.mkName . Lp.pprVar
+
+thDirtyName :: Lp.Var -> TH.Name
+thDirtyName = TH.mkName . (++ "'") . Lp.pprVar
+
+
+-- | Can error out if the variable is already there
+insertFreshlyBound :: VarList -> Var -> VarList
+insertFreshlyBound vars v = Map.insertWith err v False vars
+  where err _ _ = err_ALREADY_BOUND v
+
+
+-- | The variable is either not present in the variable list or it's marked as clean.
+--
+-- Will error out if the variable is already dirty (has been assigned to)
+insertCheckClean :: VarList -> Var -> VarList
+insertCheckClean vars v = Map.insertWith err v False vars
+  where err _ True = err_ALREADY_ASSIGNED v
+        err d _ = d -- Supposedly False, i.e. Clean
+
+
+markDirty :: VarList -> Var -> VarList
+markDirty vars v
+  = case (v `Map.member` vars) of
+      True  -> Map.insertWith err v True vars
+      False -> err_NOT_BOUND v
+  where err _ True  = err_ALREADY_ASSIGNED v
+        err d False = d -- Supposedly True, i.e. dirty
+
+
+err_ALREADY_ASSIGNED v = error $
+    "Attempted to use `" ++ pprVar v ++ "' which has been assigned to in this block."
+
+err_ALREADY_BOUND v = error $
+    "Attemped to bind `" ++ pprVar v ++ "' which was already bound elsewhere."
+
+err_NOT_BOUND v = error $
+    "Attempted to assign to `" ++ pprVar v ++ "' which has not been bound yet."
+
+
+{-
 pluginEntryCode :: String -> TypeRep -> Var -> Loop -> (String, [Arg])
 pluginEntryCode entryFnName resultType resultVar loop
   = let code = entryFnName ++ " :: [Dynamic] -> Dynamic" ++\
@@ -175,3 +313,4 @@ preamble moduleName =
   "newArray :: Unbox a => Int -> ST (MV.MVector s a)                       " ++\
   "newArray n = MV.new n                                                   " ++\
   "                                                                        "
+-}

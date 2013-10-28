@@ -3,7 +3,7 @@ module Data.LiveFusion.Combinators where
 
 import Data.LiveFusion.Loop as Loop
 import Data.LiveFusion.Util
---import Data.LiveFusion.HsCodeGen
+import Data.LiveFusion.HsCodeGen
 
 import qualified Data.Vector.Unboxed as V
 import Prelude hiding ( map, zip, filter, zipWith )
@@ -373,7 +373,15 @@ test0 = ZipWith (+)
         (fl [1,2,3])
       $ Scan (+) 0 $ Filter (const True) $ Map (+1) $ fl [4,5,6]
 
-main = print =<< fuseToLoop test0
+loop0 = unsafePerformIO $ fuseToLoop test0
+
+block0 lbl = blocks loop0 ! lbl
+
+init0 = block0 initLbl
+guard0 = block0 guardLbl
+body0 = block0 bodyLbl
+bottom0 = block0 bottomLbl
+done0 = block0 doneLbl
 
 {-
 runTests = do
