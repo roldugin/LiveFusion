@@ -7,10 +7,13 @@ module Data.LiveFusion.Loop where
 
 import Data.LiveFusion.Util
 
-import Data.Map as Map hiding ( map )
+import Data.Map as Map hiding ( map, foldl )
 import Data.Dynamic
 import Data.List as List
 import Data.Monoid
+import Control.Monad
+import Control.Category ( (>>>) )
+
 
 type Id = Int
 
@@ -18,7 +21,10 @@ type Name  = String
 
 data Var = IdVar Name Id
          | SimplVar Name
-  deriving ( Show, Eq, Ord )
+  deriving ( Eq, Ord )
+
+instance Show Var where
+  show = pprVar
 
 var :: Name -> Id -> Var
 var = IdVar
@@ -38,6 +44,9 @@ type Arg   = Dynamic
 
 data Block = Block Label [Stmt]
 
+loopBlockstmts :: Block -> [Stmt]
+loopBlockstmts (Block _ stmts) = stmts
+
 type Label = String
 
 data Stmt = Bind Var Expr
@@ -53,13 +62,13 @@ guardStmt = Guard
 gotoStmt = Goto
 
 data Loop = Loop { -- | Global arguments and their values
-                   args   :: (Map Var Arg)
+                   loopArgs   :: (Map Var Arg)
 
                    -- | List of requested manifest arrays
-                 , out    :: [Var]
+                 , loopResults    :: [Var]
 
-                   -- | List of goto code blocks
-                 , blocks :: BlockMap
+                   -- | List of goto code loopBlocks
+                 , loopBlocks :: BlockMap
                  }
 
 type BlockMap = Map Label Block
@@ -73,14 +82,14 @@ updateBlock lbl mut loop = putBlock block' loop
 getBlock :: Label -> Loop -> Block
 getBlock lbl loop = maybe emptyBlock id maybeBlock
   where
-    blockMap = blocks loop
+    blockMap  = loopBlocks loop
     maybeBlock = Map.lookup lbl blockMap
     emptyBlock = Block lbl []
 
 putBlock :: Block -> Loop -> Loop
-putBlock blk@(Block lbl _) loop = loop { blocks = blocks' }
+putBlock blk@(Block lbl _) loop = loop { loopBlocks = loopBlocks' }
   where
-    blocks' = Map.insert lbl blk (blocks loop)
+    loopBlocks' = Map.insert lbl blk (loopBlocks loop)
 
 addStmtsToBlock :: [Stmt] -> Block -> Block
 addStmtsToBlock stmts (Block lbl stmts0) = Block lbl (stmts0 ++ stmts)
@@ -113,18 +122,18 @@ pprLabel :: Label -> String
 pprLabel = id
 
 instance Show Loop where
-  show (Loop args out blocks)
-    = "Loop Args:   " ++ (show $ map pprVar $ Map.keys args) ++\
-      "     Out:    " ++ show out ++\
-      "     Blocks: " ++\ pprBlockMap blocks
+  show (Loop loopArgs loopResults loopBlocks)
+    = "Loop LoopArgs:   " ++ (show $ map pprVar $ Map.keys loopArgs) ++\
+      "     LoopResults:    " ++ show loopResults ++\
+      "     LoopBlocks: " ++\ pprBlockMap loopBlocks
 
 
-addArg var arg loop = loop { args = args' }
-  where args' = Map.insert var arg (args loop)
+addArg var arg loop = loop { loopArgs = loopArgs' }
+  where loopArgs' = Map.insert var arg (loopArgs loop)
 
 
-addOut arrVar loop = loop { out = out' }
-  where out' = arrVar : (out loop)
+addLoopResults arrVar loop = loop { loopResults = loopResults' }
+  where loopResults' = arrVar : (loopResults loop)
 
 
 -- | Several predefined labels
@@ -134,8 +143,8 @@ initLbl = "init"
 guardLbl :: Label
 guardLbl = "guard"
 
-readLbl :: Label
-readLbl = "read"
+--readLbl :: Label
+--readLbl = "read"
 
 bodyLbl :: Label
 bodyLbl = "body"
@@ -145,6 +154,171 @@ bottomLbl = "bottom"
 
 doneLbl :: Label
 doneLbl = "done"
+
+
+-- | Per block environment which tracks the variables that the block
+--   relies upon being present, the variables declared in this block as well as
+--   variables that have been destructively assigned to in this block.
+--
+--   The environment can be used to compute the arguments to the block when presenting
+--   it as pure function as well as detect programming errors of the DSL program.
+--
+data Env = Env { -- | Variables expected to be in environment
+                 envAssumptions :: [Var]
+
+                 -- | Newly declared variables
+               , envDeclarations :: [Var]
+
+                 -- | Variables that have been assigned to
+               , envDirty :: [Var]
+
+                 -- | LoopBlocks to which control flow may be transferred
+               , envNextBlocks :: [Label]
+               }
+
+
+err_DECLARED = "[Loop DSL Error] Variable already declared in the environment: "
+err_NOTDECLARED = "[Loop DSL Error] Attmpt to assign to a variable that is not in scope: "
+-- Maximum one assignment per block for now (TODO)
+err_ASSIGNED = "[Loop DSL Error] Variable already assigned to in this block: "
+
+{-
+instance Monoid Env where
+  mempty = Env [] [] []
+  mappend (Env ass1 decl1 envDirty1) (Env ass2 decl2 envDirty2) = Env ass decl envDirty
+    where
+      ass   = (ass1 \\ decl) `List.union` (ass2 \\ decl) -- TODO: Ugly. Forcibly disjoins vars
+                                                         -- assumed from prev loopBlocks and
+                                                         -- declared in the current block
+      decl  = if null bad@(common [decl1, decl2, ass1, ass2])
+                 then decl1 ++ decl2
+                 else die err_DECLARED bad
+      envDirty = disjointCheck err_ASSIGNED envDirty1 envDirty2 -- TODO: probably also wanna check the var
+                                                       -- has been declared
+      disjointCheck errString xs ys
+            = let badVars = xs `intersect` ys
+              in  if List.null badVars
+                     then xs ++ ys
+                     else die errString badVars
+                          -- This is a crude way to fail, however there is no easy
+                          -- static way to check this. Besides, the DSL is internal
+                          -- to the library so it should not fail if everything is
+                          -- implemented right.
+      die errString badVars = error $ errString ++ show badVars
+-}
+
+
+emptyEnv = Env [] [] [] []
+
+
+declare :: Var -> Env -> Env
+declare v env
+  | (v `elem` envAssumptions env) || (v `elem` envDeclarations env) -- already declared
+  = error (err_DECLARED ++ pprVar v)
+
+  | otherwise
+  = env { envDeclarations = v : envDeclarations env }
+
+
+markEnvDirty :: Var -> Env -> Env
+markEnvDirty v env
+  | (v `notElem` envAssumptions env) && (v `notElem` envDeclarations env)
+  = error (err_NOTDECLARED ++ pprVar v)
+
+  | (v `elem` envDirty env)
+  = error (err_ASSIGNED ++ pprVar v)
+
+  | otherwise
+  = env { envDirty = v : envDirty env }
+
+
+assume :: Var -> Env -> Env
+assume v env
+  | (v `elem` envDeclarations env) || (v `elem` envAssumptions env) -- already assumed (or declared)
+  = env
+
+  | otherwise
+  = env { envAssumptions = v : envAssumptions env }
+
+
+assumeMany :: [Var] -> Env -> Env
+assumeMany vars env = List.foldr assume env vars
+
+
+-- | Lists the block as as potentian next block to which control flow will be transferred
+adoptBlock :: Label -> Env -> Env
+adoptBlock lbl env
+  = env { envNextBlocks = [lbl] `List.union` envNextBlocks env }
+
+
+-- | Retrieves the free variables of an expression
+varsE :: Expr -> [Var]
+varsE (VarE v) = [v]
+varsE (App1 f v) = [f, v]
+varsE (App2 f v1 v2) = [f, v1, v2]
+varsE (App3 f v1 v2 v3) = [f, v1, v2, v3]
+varsE (IntLit _) = []
+
+
+blockEnv :: Block -> Env
+blockEnv blk = foldl (flip analyse) emptyEnv (loopBlockstmts blk)
+  where
+    analyse :: Stmt -> Env -> Env
+    analyse (Bind v e)     = assumeMany (varsE e) >>> declare v
+    analyse (Assign v e)   = assumeMany (varsE e) >>> markEnvDirty v
+    analyse (Case v lt lf) = assume v >>> adoptBlock lt >>> adoptBlock lf
+    analyse (Guard p lf)   = assume p >>> adoptBlock lf
+    analyse (Goto l)       = adoptBlock l
+
+
+-- | Transitive environment envAssumptions
+type VarMap = Map Label [Var]
+
+extendedEnv :: Loop -> VarMap
+extendedEnv loop = traceEnv Map.empty initLbl -- init is assumed to be the entry block
+  where
+    traceEnv :: VarMap -> Label -> VarMap
+    traceEnv emap currLbl
+      | currLbl `Map.member` emap  -- Cycle detected - stop
+      = emap
+
+      | otherwise
+      = let assms = envAssumptions env  -- environment assumptions of current block
+
+            hole  = Map.insert currLbl assms emap -- insert a hole to mark the node as visited
+
+            env   = blockEnv (getBlock currLbl loop)
+
+            nextLbls = envNextBlocks env   -- all possible next blocks
+
+            -- Merge extended environments of past and future blocks.
+            -- NOTE: If a block pops up multiple times it is guarranteed both extended
+            --       environments are equal, so a default Map.union == Map.unionWith const
+            --       is sufficient.
+            nextEnv = foldl Map.union
+                      hole                 -- extended environment of this and past blocks
+                    $ map (traceEnv hole)  -- assumptions of future blocks
+                    $ nextLbls
+
+            -- Lastly project all future assumptions to current block,
+            -- minus the variables declared in current block
+            almightyEnv = removeCurrDecls
+                        $ foldl project nextEnv nextLbls
+
+            project env nextLbl = Map.insertWith List.union currLbl (env ! nextLbl) env
+
+            removeCurrDecls = Map.adjust (List.\\ envDeclarations env) currLbl
+
+        in  almightyEnv
+
+
+-- | Inserts known Gotos between several of the predefined blocks
+postprocessLoop :: Loop -> Loop
+postprocessLoop
+  = addStmt (gotoStmt guardLbl)  initLbl    -- Init -> Guard
+  . addStmt (gotoStmt bodyLbl)   guardLbl   -- Guard -> Body
+  . addStmt (gotoStmt bottomLbl) bodyLbl    -- Body -> Bottom
+  . addStmt (gotoStmt guardLbl)  bottomLbl  -- Bottom -> Guard
 
 
 -- Guard which causes the end of loop on failure (like break)
@@ -167,9 +341,9 @@ doneLbl = "done"
 instance Monoid Loop where
   mempty = Loop Map.empty [] Map.empty
   mappend loop1 loop2
-    = Loop { args   = args   `joinBy` Map.union
-           , out    = out    `joinBy` List.union
-           , blocks = blocks `joinBy` Map.unionWith appendBlocks
+    = Loop { loopArgs    = loopArgs    `joinBy` Map.union
+           , loopResults = loopResults `joinBy` List.union
+           , loopBlocks  = loopBlocks  `joinBy` Map.unionWith appendLoopBlocks
            }
     where
       joinBy :: (Loop  -> field)          -- field to take from loop
@@ -186,8 +360,8 @@ empty :: Loop
 empty = mempty
 
 
-appendBlocks :: Block -> Block -> Block
-appendBlocks (Block lbl stmts1) (Block _ stmts2)
+appendLoopBlocks :: Block -> Block -> Block
+appendLoopBlocks (Block lbl stmts1) (Block _ stmts2)
   = Block lbl (stmts1 ++ stmts2)
 
 -- | Represents an expression in the loop.
