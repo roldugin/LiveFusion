@@ -1,7 +1,6 @@
 {-# LANGUAGE TemplateHaskell #-}
 
 -- Source Haskell code generator.
--- Most of the code is still in Combinators.hs but will migrate here SOON (c).
 
 module Data.LiveFusion.HsCodeGen where
 
@@ -11,141 +10,114 @@ import Data.LiveFusion.Loop as Lp
 import Language.Haskell.TH as TH
 
 import Data.Dynamic
-import Data.Map ( Map )
+import Data.Map ( Map, (!) )
 import qualified Data.Map as Map
 import Data.List
 
-type VarList = Map Var Bool -- Dirty flag means that a variable has been updates in the given block
-
-cgBlock :: VarList -> Block -> Dec
-cgBlock vars (Block lbl stmts) = FunD (mkName lbl) [Clause pats body []]
+-- | Generate a TH function represeting a code block of a loop.
+--
+--   TODO: Perhaps passing the whole environment is not the best approach.
+--   TODO: KNOWN ISSUE Updated variable cannot be used in the same block.
+cgBlock :: VarMap -> Block -> Dec
+cgBlock emap blk@(Block lbl stmts) = blockFun
   where
-    pats = map (BangP . VarP . thName) (Map.keys vars) -- this relies keys being in order
+    blockFun = FunD (mkName lbl) [Clause pats body []]
+    pats = map (BangP . VarP . thName) blockArgs
     body = NormalB $ DoE thStmts
-    (vars', thStmts) = mapAccumL stmt (clearVars vars) stmts
+    thStmts = map (toTHStmt emap dirtyVars) stmts
+
+    blockArgs = emap ! lbl
+
+    -- Variables that are updated in this block
+    dirtyVars = envDirty (blockEnv blk)
 
 
--- | Unsets dirty flag on al vars
-clearVars :: VarList -> VarList
-clearVars = Map.map (const False)
-
--- | Generates a TH statement from a statement in our repr.
---
--- Along the way it populates a map of used variables and their update status.
---
--- It is suitable to be used as an accumulating function to mapAccumL.
-stmt :: VarList -> Lp.Stmt -> (VarList, TH.Stmt)
-stmt vars (Bind v e)
-  = let vars'  = insertFreshlyBound vars v
-        (vars'', thExpr) = expr vars' e
+-- | Generates a TH statement from a statement in our Loop representation.
+toTHStmt :: VarMap -> [Var] -> Lp.Stmt -> TH.Stmt
+toTHStmt _ _ (Bind v e)
+  = let thExp = toTHExp e
         thVar  = VarP $ thName v
-        thStmt = LetS [ValD thVar (NormalB thExpr) [{-no where clause-}]]
-    in  (vars'', thStmt)
-stmt vars (Assign v e)
-  = let (vars', thExpr) = expr vars e
-        vars'' = markDirty vars' v      -- the order matters, since expr expects v to be clean
-                                        -- TODO: single update per block starts to sound like a bad idea now
+        thStmt = LetS [ValD thVar (NormalB thExp) [{-no where clause-}]]
+    in  thStmt
+
+toTHStmt _ _ (Assign v e)
+  = let thExp = toTHExp e
         thVar  = VarP $ thDirtyName v
-        thStmt = LetS [ValD thVar (NormalB thExpr) [{-no where clause-}]]
-    in  (vars'', thStmt)
-stmt vars (Case pred tLbl fLbl)
-  = let (vars', thPredExp) = expr vars (Lp.VarE pred)
-        thTExp = goto vars' tLbl
-        thFExp = goto vars' fLbl
+        thStmt = LetS [ValD thVar (NormalB thExp) [{-no where clause-}]]
+    in  thStmt
+
+toTHStmt emap dirtyVars (Case pred tLbl fLbl)
+  = let thPredExp = toTHExp (Lp.VarE pred)
+        thTExp = goto emap dirtyVars tLbl
+        thFExp = goto emap dirtyVars fLbl
         thStmt = NoBindS $ CondE thPredExp thTExp thFExp
-    in  (vars', thStmt)
-stmt vars (Guard pred onFailLbl)
-  = let (vars', thPredExp) = expr vars (Lp.VarE pred)
-        thGotoExp = goto vars' onFailLbl
+    in  thStmt
+
+toTHStmt emap dirtyVars (Guard pred onFailLbl)
+  = let thPredExp = toTHExp (Lp.VarE pred)
+        thGotoExp = goto emap dirtyVars onFailLbl
         unlessFn = TH.VarE $ mkName "Control.Monad.unless"
         thStmt = NoBindS $ TH.AppE (TH.AppE unlessFn thPredExp) thGotoExp
-    in  (vars', thStmt)
-stmt vars (Goto lbl)
-  = let thStmt  = NoBindS $ goto vars lbl
-    in  (vars, thStmt)
+    in  thStmt
 
-goto :: VarList -> Label -> TH.Exp
-goto vars lbl = foldl TH.AppE fname args
+toTHStmt emap dirtyVars (Goto lbl)
+  = NoBindS $ goto emap dirtyVars lbl
+
+
+goto :: VarMap -> [Var] -> Label -> TH.Exp
+goto emap dirtyVars lbl = foldl TH.AppE thFName thArgs
   where
-    fname = TH.VarE $ mkName lbl
-    args  = map TH.VarE
-          $ map toTHName
-          $ Map.toList vars
+    args    = emap ! lbl
 
-    toTHName (v, False) = thName v
-    toTHName (v, True)  = thDirtyName v
+    thFName = TH.VarE $ mkName lbl
+
+    thArgs  = map TH.VarE
+            $ map toTHName
+            $ args
+
+    toTHName v | v `elem` dirtyVars = thDirtyName v
+               | otherwise          = thName v
 
 
--- | Turn a Loop expression to a TH expression keeping an environment of seen variables.
+-- | Turn a Loop toTHExpession to a TH toTHExpession.
 --
--- TODO: This begs for an abstraction
-expr :: VarList -> Lp.Expr -> (VarList, TH.Exp)
-expr vars (Lp.VarE v)
-  = let vars' = insertCheckClean vars v
-        thExp = TH.VarE $ thName v
-    in  (vars', thExp)
-expr vars (Lp.App1 f v)
-  = let (vars1, th_f) = expr vars  $ Lp.VarE f
-        (vars2, th_v) = expr vars1 $ Lp.VarE v
-        thExp = TH.AppE th_f th_v
-    in  (vars2, thExp)
-expr vars (Lp.App2 f v1 v2)
-  = let (vars1, th_f)  = expr vars  $ Lp.VarE f
-        (vars2, th_v1) = expr vars1 $ Lp.VarE v1
-        (vars3, th_v2) = expr vars2 $ Lp.VarE v2
-        thExp = TH.AppE (TH.AppE th_f th_v1) th_v2
-    in  (vars3, thExp)
-expr vars (Lp.App3 f v1 v2 v3)
-  = let (vars1, th_f)  = expr vars  $ Lp.VarE f
-        (vars2, th_v1) = expr vars1 $ Lp.VarE v1
-        (vars3, th_v2) = expr vars2 $ Lp.VarE v2
-        (vars4, th_v3) = expr vars3 $ Lp.VarE v3
-        thExp = TH.AppE (TH.AppE (TH.AppE th_f th_v1) th_v2) th_v3
-    in  (vars3, thExp)
-expr vars (Lp.IntLit i)
-  = let thExp = TH.LitE $ TH.IntegerL $ toInteger i
-    in  (vars, thExp)
+toTHExp :: Lp.Expr -> TH.Exp
+toTHExp (Lp.VarE v)
+  = toTHVarE v
 
+toTHExp (Lp.App1 f v)
+  = let th_f = toTHVarE f
+        th_v = toTHVarE v
+    in  TH.AppE th_f th_v
+
+toTHExp (Lp.App2 f v1 v2)
+  = let th_f  = toTHVarE f
+        th_v1 = toTHVarE v1
+        th_v2 = toTHVarE v2
+    in  TH.AppE (TH.AppE th_f th_v1) th_v2
+
+toTHExp (Lp.App3 f v1 v2 v3)
+  = let th_f  = toTHVarE f
+        th_v1 = toTHVarE v1
+        th_v2 = toTHVarE v2
+        th_v3 = toTHVarE v3
+    in  TH.AppE (TH.AppE (TH.AppE th_f th_v1) th_v2) th_v3
+
+toTHExp (Lp.IntLit i)
+  = TH.LitE $ TH.IntegerL $ toInteger i
+
+
+-- | Perhaps one day we will support Exprs in more places.
+--   For now much of our loop language are just Vars.
+toTHVarE :: Lp.Var -> TH.Exp
+toTHVarE = TH.VarE . thName
 
 thName :: Lp.Var -> TH.Name
 thName = TH.mkName . Lp.pprVar
 
+
 thDirtyName :: Lp.Var -> TH.Name
 thDirtyName = TH.mkName . (++ "'") . Lp.pprVar
-
-
--- | Can error out if the variable is already there
-insertFreshlyBound :: VarList -> Var -> VarList
-insertFreshlyBound vars v = Map.insertWith err v False vars
-  where err _ _ = err_ALREADY_BOUND v
-
-
--- | The variable is either not present in the variable list or it's marked as clean.
---
--- Will error out if the variable is already dirty (has been assigned to)
-insertCheckClean :: VarList -> Var -> VarList
-insertCheckClean vars v = Map.insertWith err v False vars
-  where err _ True = err_ALREADY_ASSIGNED v
-        err d _ = d -- Supposedly False, i.e. Clean
-
-
-markDirty :: VarList -> Var -> VarList
-markDirty vars v
-  = case (v `Map.member` vars) of
-      True  -> Map.insertWith err v True vars
-      False -> err_NOT_BOUND v
-  where err _ True  = err_ALREADY_ASSIGNED v
-        err d False = d -- Supposedly True, i.e. dirty
-
-
-err_ALREADY_ASSIGNED v = error $
-    "Attempted to use `" ++ pprVar v ++ "' which has been assigned to in this block."
-
-err_ALREADY_BOUND v = error $
-    "Attemped to bind `" ++ pprVar v ++ "' which was already bound elsewhere."
-
-err_NOT_BOUND v = error $
-    "Attempted to assign to `" ++ pprVar v ++ "' which has not been bound yet."
 
 
 {-
@@ -205,16 +177,16 @@ loopSTCode resultTy resultVar (Loop args state binds guards len)
     guardsCode'    = guardsCode guards
     fst3 (a,_,_)   = a
 
-stateInitCode :: [(Var,Expr,Expr)] -> [String]
+stateInitCode :: [(Var,ToTHExp,ToTHExp)] -> [String]
 stateInitCode = map bind
   where
-    bind (var,expr,_) = (pprVar var) ++ " <- " ++ (pprExpr expr)
+    bind (var,toTHExp,_) = (pprVar var) ++ " <- " ++ (pprToTHExp toTHExp)
 
 
 --stateArgs :: [State] -> (String, Var)
 --
 
-stateUpdateCode :: [(Var,Expr,Expr)] -> [String]
+stateUpdateCode :: [(Var,ToTHExp,ToTHExp)] -> [String]
 stateUpdateCode map = []
 
 
@@ -229,7 +201,7 @@ yieldCode resultVar
     "  loop dst (i+1) (o+1) }"
 
 
-guardsCode :: [(Expr,Var)] -> [String]
+guardsCode :: [(ToTHExp,Var)] -> [String]
 guardsCode guards
   = let (codes, first) = guardsCode' 1 guards
         entry = "guards = " ++ pprVar first -- `guard = yield' in case of no guards
@@ -242,44 +214,44 @@ guardsCode guards
             code  = guardCode label grd cont
         in  (code:codes, label)
     guardCode label (predicate,onfail) cont
-      = pprVar label ++ " = case " ++ pprExpr predicate ++ " of " ++
+      = pprVar label ++ " = case " ++ pprToTHExp predicate ++ " of " ++
         "{ False -> " ++ pprVar onfail ++ "; True -> " ++ pprVar cont ++ " }"
 
 
-bindsCode :: (Map Var Expr) -> [String]
+bindsCode :: (Map Var ToTHExp) -> [String]
 bindsCode = map bindCode . Map.toList
-  where bindCode (var, expr) = (pprVar var) ++ " = " ++ (pprExpr expr)
+  where bindCode (var, toTHExp) = (pprVar var) ++ " = " ++ (pprToTHExp toTHExp)
 
 
 --------------------------------------------------------------------------------
--- Expressions commonly used in loops ------------------------------------------
+-- ToTHExpessions commonly used in loops ------------------------------------------
 
 -- TODO: These should be independent of the code generation backend.
 
 -- | Read an element from an array
-readArrayExpr :: Var -> Var -> Expr
-readArrayExpr arr ix = App2 reader arr ix
+readArrayToTHExp :: Var -> Var -> ToTHExp
+readArrayToTHExp arr ix = App2 reader arr ix
   where reader = Var "readArray"
 
 
 -- | Write an element to an array
-writeArrayExpr :: Var -> Var -> Var -> Expr
-writeArrayExpr arr ix elt = App3 writer arr ix elt
+writeArrayToTHExp :: Var -> Var -> Var -> ToTHExp
+writeArrayToTHExp arr ix elt = App3 writer arr ix elt
   where writer = Var "writeArray"
 
 
-ltExpr :: Var -> Var -> Expr
-ltExpr a b = App2 op a b
+ltToTHExp :: Var -> Var -> ToTHExp
+ltToTHExp a b = App2 op a b
   where op = Var "(<)"
 
 
-newArrayExpr :: Var -> Expr
-newArrayExpr len = App1 allocator len
+newArrayToTHExp :: Var -> ToTHExp
+newArrayToTHExp len = App1 allocator len
   where allocator = Var "newArray"
 
 
-incrExpr :: Var -> Expr
-incrExpr var = App1 incr var
+incrToTHExp :: Var -> ToTHExp
+incrToTHExp var = App1 incr var
   where incr = Var "increment"
 
 

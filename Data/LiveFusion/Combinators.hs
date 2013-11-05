@@ -26,9 +26,11 @@ import Data.Map as Map hiding ( map, filter )
 import Control.Applicative
 import Text.Show.Functions
 import Data.Maybe
-import Data.List as List ( union )
+import Data.List as List
 import Data.Dynamic
 import Control.Arrow ( (>>>) )
+import Language.Haskell.TH ( pprint )
+
 
 tr a = trace (show a) a
 
@@ -368,20 +370,22 @@ loadSourceGhc path = let
 -------------- Tests -------------------------
 fl = Data.LiveFusion.Combinators.fromList
 
-test0 :: ArrayAST Int
-test0 = ZipWith (+)
+example0 :: ArrayAST Int
+example0 = ZipWith (+)
         (fl [1,2,3])
       $ Scan (+) 0 $ Filter (const True) $ Map (+1) $ fl [4,5,6]
 
-loop0 = unsafePerformIO $ fuseToLoop test0
+loop0 = postprocessLoop $ unsafePerformIO $ fuseToLoop example0
 
 block0 lbl = loopBlockMap loop0 ! lbl
 
-init0 = block0 initLbl
-guard0 = block0 guardLbl
-body0 = block0 bodyLbl
-bottom0 = block0 bottomLbl
-done0 = block0 doneLbl
+test0 :: IO ()
+test0 = putStrLn
+      $ pprint
+      $ List.map codeGenBlock allBlocks
+  where
+    codeGenBlock lbl = cgBlock (extendedEnv loop0) (block0 lbl)
+    allBlocks        = Map.keys $ loopBlockMap loop0
 
 {-
 runTests = do
