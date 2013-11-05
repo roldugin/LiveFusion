@@ -375,7 +375,7 @@ test0 = ZipWith (+)
 
 loop0 = unsafePerformIO $ fuseToLoop test0
 
-block0 lbl = loopBlocks loop0 ! lbl
+block0 lbl = loopBlockMap loop0 ! lbl
 
 init0 = block0 initLbl
 guard0 = block0 guardLbl

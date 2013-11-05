@@ -7,7 +7,8 @@ module Data.LiveFusion.Loop where
 
 import Data.LiveFusion.Util
 
-import Data.Map as Map hiding ( map, foldl )
+import Data.Map ( Map )
+import qualified Data.Map as Map
 import Data.Dynamic
 import Data.List as List
 import Data.Monoid
@@ -44,8 +45,8 @@ type Arg   = Dynamic
 
 data Block = Block Label [Stmt]
 
-loopBlockstmts :: Block -> [Stmt]
-loopBlockstmts (Block _ stmts) = stmts
+blockStmts :: Block -> [Stmt]
+blockStmts (Block _ stmts) = stmts
 
 type Label = String
 
@@ -67,11 +68,17 @@ data Loop = Loop { -- | Global arguments and their values
                    -- | List of requested manifest arrays
                  , loopResults    :: [Var]
 
-                   -- | List of goto code loopBlocks
-                 , loopBlocks :: BlockMap
+                   -- | List of goto code loopBlockMap
+                 , loopBlockMap :: BlockMap
                  }
 
+
 type BlockMap = Map Label Block
+
+
+loopBlocks :: Loop -> [Block]
+loopBlocks = Map.elems . loopBlockMap
+
 
 updateBlock :: Label -> (Block -> Block) -> Loop -> Loop
 updateBlock lbl mut loop = putBlock block' loop
@@ -79,53 +86,63 @@ updateBlock lbl mut loop = putBlock block' loop
     block  = getBlock lbl loop
     block' = mut block
 
+
 getBlock :: Label -> Loop -> Block
 getBlock lbl loop = maybe emptyBlock id maybeBlock
   where
-    blockMap  = loopBlocks loop
+    blockMap  = loopBlockMap loop
     maybeBlock = Map.lookup lbl blockMap
     emptyBlock = Block lbl []
 
+
 putBlock :: Block -> Loop -> Loop
-putBlock blk@(Block lbl _) loop = loop { loopBlocks = loopBlocks' }
+putBlock blk@(Block lbl _) loop = loop { loopBlockMap = loopBlockMap' }
   where
-    loopBlocks' = Map.insert lbl blk (loopBlocks loop)
+    loopBlockMap' = Map.insert lbl blk (loopBlockMap loop)
+
 
 addStmtsToBlock :: [Stmt] -> Block -> Block
 addStmtsToBlock stmts (Block lbl stmts0) = Block lbl (stmts0 ++ stmts)
+
 
 -- Append a statement to the specified code block
 addStmt :: Stmt -> Label -> Loop -> Loop
 addStmt stmt lbl = updateBlock lbl (addStmtsToBlock [stmt])
 
+
 addStmts :: [Stmt] -> Label -> Loop -> Loop
 addStmts stmts lbl = updateBlock lbl (addStmtsToBlock stmts)
 
+
 pprBlockMap :: BlockMap -> String
-pprBlockMap = concatMap pprBlock . elems
+pprBlockMap = concatMap pprBlock . Map.elems
+
 
 pprBlock :: Block -> String
 pprBlock (Block lbl stmts)
   = pprLabel lbl ++ ":" ++\
     (indent 1 $ unlines $ map pprStmt stmts)
 
+
 pprStmt :: Stmt -> String
 pprStmt (Bind v e)     = "let " ++ pprVar v ++ " = " ++ pprExpr e
 pprStmt (Assign v e)   = pprVar v ++ " := " ++ pprExpr e
-pprStmt (Guard v l)    = "guard " ++ pprVar v ++ " onFail " ++ pprLabel l
+pprStmt (Guard v l)    = "guard on " ++ pprVar v ++ " | onFail: " ++ pprLabel l
 pprStmt (Case p l1 l2) = "if " ++ pprVar p ++
                          " then " ++ pprLabel l1 ++
                          " else " ++ pprLabel l2
 pprStmt (Goto l)       = "goto " ++ pprLabel l
 
+
 pprLabel :: Label -> String
 pprLabel = id
 
+
 instance Show Loop where
-  show (Loop loopArgs loopResults loopBlocks)
-    = "Loop LoopArgs:   " ++ (show $ map pprVar $ Map.keys loopArgs) ++\
+  show (Loop loopArgs loopResults loopBlockMap)
+    = "Loop LoopArgs:   " ++ (show $ Map.keys loopArgs) ++\
       "     LoopResults:    " ++ show loopResults ++\
-      "     LoopBlocks: " ++\ pprBlockMap loopBlocks
+      "     LoopBlockMap: " ++\ pprBlockMap loopBlockMap
 
 
 addArg var arg loop = loop { loopArgs = loopArgs' }
@@ -172,7 +189,7 @@ data Env = Env { -- | Variables expected to be in environment
                  -- | Variables that have been assigned to
                , envDirty :: [Var]
 
-                 -- | LoopBlocks to which control flow may be transferred
+                 -- | LoopBlockMap to which control flow may be transferred
                , envNextBlocks :: [Label]
                }
 
@@ -188,7 +205,7 @@ instance Monoid Env where
   mappend (Env ass1 decl1 envDirty1) (Env ass2 decl2 envDirty2) = Env ass decl envDirty
     where
       ass   = (ass1 \\ decl) `List.union` (ass2 \\ decl) -- TODO: Ugly. Forcibly disjoins vars
-                                                         -- assumed from prev loopBlocks and
+                                                         -- assumed from prev loopBlockMap and
                                                          -- declared in the current block
       decl  = if null bad@(common [decl1, decl2, ass1, ass2])
                  then decl1 ++ decl2
@@ -242,13 +259,13 @@ assume v env
 
 
 assumeMany :: [Var] -> Env -> Env
-assumeMany vars env = List.foldr assume env vars
+assumeMany vars env = foldr assume env vars
 
 
 -- | Lists the block as as potentian next block to which control flow will be transferred
 adoptBlock :: Label -> Env -> Env
 adoptBlock lbl env
-  = env { envNextBlocks = [lbl] `List.union` envNextBlocks env }
+  = env { envNextBlocks = [lbl] `union` envNextBlocks env }
 
 
 -- | Retrieves the free variables of an expression
@@ -261,7 +278,7 @@ varsE (IntLit _) = []
 
 
 blockEnv :: Block -> Env
-blockEnv blk = foldl (flip analyse) emptyEnv (loopBlockstmts blk)
+blockEnv blk = foldl (flip analyse) emptyEnv (blockStmts blk)
   where
     analyse :: Stmt -> Env -> Env
     analyse (Bind v e)     = assumeMany (varsE e) >>> declare v
@@ -274,42 +291,62 @@ blockEnv blk = foldl (flip analyse) emptyEnv (loopBlockstmts blk)
 -- | Transitive environment envAssumptions
 type VarMap = Map Label [Var]
 
+
+-- | A simpler replacement of liveness analysis. Computes a maximal set of variables
+--   that may be required by the block and its futures.
+--
+--   The liveness analysis as such only applies to variables that are never used outside
+--   the block they are declared in.
 extendedEnv :: Loop -> VarMap
-extendedEnv loop = traceEnv Map.empty initLbl -- init is assumed to be the entry block
+extendedEnv loop = purgeBlockLocalVars
+                 $ traceEnv allLoopArgVars -- all declarations so far
+                            Map.empty
+                            initLbl        -- init is assumed to be the entry block
   where
-    traceEnv :: VarMap -> Label -> VarMap
-    traceEnv emap currLbl
+    allLoopArgVars     = Map.keys $ loopArgs loop
+    allLoopDecls       = concatMap (envDeclarations . blockEnv) (loopBlocks loop)
+    allLoopAssumptions = concatMap (envAssumptions  . blockEnv) (loopBlocks loop)
+    allBlockLocalVars  = (allLoopDecls `union` allLoopArgVars)
+                       \\ allLoopAssumptions
+
+    purgeBlockLocalVars :: VarMap -> VarMap
+    purgeBlockLocalVars = Map.map (\\ allBlockLocalVars)
+
+    traceEnv :: [Var] -> VarMap -> Label -> VarMap
+    traceEnv pastDecls emap currLbl
       | currLbl `Map.member` emap  -- Cycle detected - stop
       = emap
 
       | otherwise
       = let assms = envAssumptions env  -- environment assumptions of current block
 
-            hole  = Map.insert currLbl assms emap -- insert a hole to mark the node as visited
+            partialMap = Map.insert currLbl pastDecls emap -- insert all available declarations
+                                                           -- as requirements for this block
 
-            env   = blockEnv (getBlock currLbl loop)
+            env        = blockEnv (getBlock currLbl loop)  -- this block's environment
 
-            nextLbls = envNextBlocks env   -- all possible next blocks
+            partialDecls = pastDecls ++ envDeclarations env  -- all known declarations
+                                                             -- including this block's ones
 
-            -- Merge extended environments of past and future blocks.
-            -- NOTE: If a block pops up multiple times it is guarranteed both extended
-            --       environments are equal, so a default Map.union == Map.unionWith const
-            --       is sufficient.
-            nextEnv = foldl Map.union
-                      hole                 -- extended environment of this and past blocks
-                    $ map (traceEnv hole)  -- assumptions of future blocks
-                    $ nextLbls
+            nextLbls   = envNextBlocks env   -- all possible next blocks
 
-            -- Lastly project all future assumptions to current block,
-            -- minus the variables declared in current block
-            almightyEnv = removeCurrDecls
-                        $ foldl project nextEnv nextLbls
+            -- Merge environments of past and future blocks.
+            -- NOTE: If a block pops up multiple times it means there are multiple paths to
+            --       it in the control flow graph. Use only those declarations that all
+            --       paths can provide.
+            resultMap = foldl (Map.unionWith List.intersect)
+                        partialMap                 -- extended environment of this and past blocks
+                      $ map (traceEnv partialDecls partialMap)  -- assumptions of future blocks
+                      $ nextLbls
 
-            project env nextLbl = Map.insertWith List.union currLbl (env ! nextLbl) env
+        in  resultMap
 
-            removeCurrDecls = Map.adjust (List.\\ envDeclarations env) currLbl
 
-        in  almightyEnv
+pprVarMap :: VarMap -> String
+pprVarMap = ("Transitive Variable Map:" ++\)
+          . unlines . map pprVarMapEntry . Map.assocs
+  where
+    pprVarMapEntry (lbl,vars) = lbl ++ ": " ++ show vars
 
 
 -- | Inserts known Gotos between several of the predefined blocks
@@ -343,7 +380,7 @@ instance Monoid Loop where
   mappend loop1 loop2
     = Loop { loopArgs    = loopArgs    `joinBy` Map.union
            , loopResults = loopResults `joinBy` List.union
-           , loopBlocks  = loopBlocks  `joinBy` Map.unionWith appendLoopBlocks
+           , loopBlockMap  = loopBlockMap  `joinBy` Map.unionWith appendLoopBlockMap
            }
     where
       joinBy :: (Loop  -> field)          -- field to take from loop
@@ -360,8 +397,8 @@ empty :: Loop
 empty = mempty
 
 
-appendLoopBlocks :: Block -> Block -> Block
-appendLoopBlocks (Block lbl stmts1) (Block _ stmts2)
+appendLoopBlockMap :: Block -> Block -> Block
+appendLoopBlockMap (Block lbl stmts1) (Block _ stmts2)
   = Block lbl (stmts1 ++ stmts2)
 
 -- | Represents an expression in the loop.
