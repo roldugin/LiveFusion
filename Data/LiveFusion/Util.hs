@@ -52,3 +52,20 @@ intercalateMap sep f = intercalate sep . map f
 
 juxtMap :: (a -> String) -> [a] -> String
 juxtMap f = intercalateMap " " f
+
+
+-- | Like break but will also take the first matching element.
+breakIncl :: (a -> Bool) -> [a] -> ([a],[a])
+breakIncl p (x:xs)
+  | p x        = ([x],xs)
+  | otherwise  = let (ls,rs) = breakIncl p xs
+                 in  (x:ls,rs)
+breakIncl _ [] = ([],[])
+
+
+-- | partition2 (==3) [1,4,3,2,3,3,1] = [[1,4,3],[2,3],[3],[1]]
+partition2 :: (a -> Bool) -> [a] -> [[a]]
+partition2 _ [] = []
+partition2 p xs
+  = let (ls, rs) = breakIncl p xs
+    in  ls : partition2 p rs

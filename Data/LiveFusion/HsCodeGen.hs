@@ -21,15 +21,38 @@ import Data.List
 cgBlock :: VarMap -> Block -> Dec
 cgBlock emap blk@(Block lbl stmts) = blockFun
   where
-    blockFun = FunD (mkName lbl) [Clause pats body []]
+    blockFun = FunD (mkName lbl) [Clause pats fnBody []]
     pats = map (BangP . VarP . thName) blockArgs
-    body = NormalB $ DoE thStmts
-    thStmts = map (toTHStmt emap dirtyVars) stmts
+    fnBody = NormalB $ DoE (toTHStmts stmts)
+
+    toTHStmts (stmt:rest)
+      = case stmt of
+          (Guard p lbl) -> return {- a sinleton list -}
+                        $ grdToTHStmt emap dirtyVars   -- environment stuff
+                                      p    lbl         -- guard parameters
+                                      (toTHStmts rest) -- statements following the guard
+          _             -> (toTHStmt emap dirtyVars stmt) : (toTHStmts rest)
+    toTHStmts [] = []
 
     blockArgs = emap ! lbl
 
     -- Variables that are updated in this block
     dirtyVars = envDirty (blockEnv blk)
+
+
+-- | Guard is a little tricky because we have queue up the statement after
+--   the the block into one of the branches.
+--
+--   TODO: If creating new blocks was easier in our framework, we could potentially
+--   generate a whole new block for the rest of the statements and generalise the Guard
+--   to a Case expression.
+grdToTHStmt :: VarMap -> [Var] -> Var -> Label -> [TH.Stmt] -> TH.Stmt
+grdToTHStmt emap dirtyVars pred onFailLbl followingStmts
+  = let thPredExp = toTHExp (Lp.VarE pred)
+        thGotoExp = goto emap dirtyVars onFailLbl
+        thOKExp   = DoE followingStmts
+        thStmt    = NoBindS $ TH.CondE thPredExp thOKExp thGotoExp
+    in  thStmt
 
 
 -- | Generates a TH statement from a statement in our Loop representation.
@@ -51,13 +74,6 @@ toTHStmt emap dirtyVars (Case pred tLbl fLbl)
         thTExp = goto emap dirtyVars tLbl
         thFExp = goto emap dirtyVars fLbl
         thStmt = NoBindS $ CondE thPredExp thTExp thFExp
-    in  thStmt
-
-toTHStmt emap dirtyVars (Guard pred onFailLbl)
-  = let thPredExp = toTHExp (Lp.VarE pred)
-        thGotoExp = goto emap dirtyVars onFailLbl
-        unlessFn = TH.VarE $ mkName "unless"
-        thStmt = NoBindS $ TH.AppE (TH.AppE unlessFn thPredExp) thGotoExp
     in  thStmt
 
 toTHStmt emap dirtyVars (Goto lbl)
