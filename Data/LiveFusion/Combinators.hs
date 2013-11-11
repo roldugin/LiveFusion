@@ -116,69 +116,94 @@ fuse env = fuse'
         = let ast = fromJust
                   $ (getASTNode env uq) `asTypeOf` (Just var)
           in  fuse' ast uq
+
     fuse' (ArrLit2 vec) uq
-        = let arrVar   = var "arr" uq
+        = let arrVar    = arrayVar uq
+
               -- BODY
-              aVar     = eltVar uq                   -- result of every read
-              aBind    = bindStmt aVar (App2 readFn ixVar arrVar) -- read statement
+              aVar      = eltVar uq                   -- result of every read
+              aBind     = bindStmt aVar (App2 readFn ixVar arrVar) -- read statement
               bodyStmts = [aBind]
+
               -- INIT
-              lenVar   = var "len" uq
-              lenBind  = bindStmt lenVar (App1 lengthFn arrVar)
-              ixVar    = indexVar uq                 -- index
-              ixInit   = bindStmt ixVar (IntLit 0)    -- index initialization
-              initStmts= [ixInit, lenBind]
+              lenVar    = lengthVar uq
+              lenBind   = bindStmt lenVar (App1 lengthFn arrVar)
+              ixVar     = indexVar uq                 -- index
+              ixInit    = bindStmt ixVar (IntLit 0)    -- index initialization
+              initStmts = [ixInit, lenBind]
+
               -- BOTTOM
-              oneVar   = var "one" uq
-              oneBind  = bindStmt oneVar (IntLit 1)  -- index step
-              ixUpdate = assignStmt ixVar (App2 plusFn ixVar oneVar)
-              botStmts = [oneBind, ixUpdate]
+              oneVar    = var "one" uq
+              oneBind   = bindStmt oneVar (IntLit 1)  -- index step
+              ixUpdate  = assignStmt ixVar (App2 plusFn ixVar oneVar)
+              botStmts  = [oneBind, ixUpdate]
+
               -- GUARD
-              predVar  = var "pred" uq -- boolean guard predicate
-              predBind = bindStmt predVar (App2 ltFn ixVar lenVar)
-              ixGuard  = guardStmt predVar doneLbl
-              grdStmts = [predBind, ixGuard]
+              predVar   = var "pred" uq -- boolean guard predicate
+              predBind  = bindStmt predVar (App2 ltFn ixVar lenVar)
+              ixGuard   = guardStmt predVar doneLbl
+              grdStmts  = [predBind, ixGuard]
+
               -- LOOP
-              loop     = addArg arrVar (toDyn vec)
-                       $ addStmts initStmts  initLbl
-                       $ addStmts grdStmts   guardLbl
-                       $ addStmts bodyStmts  bodyLbl
-                       $ addStmts botStmts   bottomLbl
-                       $ Loop.empty
+              loop      = setArrResultOnly uq
+                        $ addArg arrVar (toDyn vec)
+                        $ addStmts initStmts  initLbl
+                        $ addStmts grdStmts   guardLbl
+                        $ addStmts bodyStmts  bodyLbl
+                        $ addStmts botStmts   bottomLbl
+                        $ Loop.empty
           in  (loop, uq) -- TODO return a result that maps an element of array
+
     fuse' (Map2 f arr) uq
         = let (arr_loop, arr_uq) = fuse' arr uq -- TODO: this uq means nothing
-              aVar  = eltVar arr_uq         -- element of source array
+              aVar      = eltVar arr_uq         -- element of source array
+
               -- BODY
-              fVar  = var "f" uq            -- name of function to apply
-              fApp  = App1 fVar aVar        -- function application
-              bVar  = eltVar uq             -- resulting element variable
-              bBind = bindStmt bVar fApp    -- bind result
+              fVar      = var "f" uq            -- name of function to apply
+              fApp      = App1 fVar aVar        -- function application
+              bVar      = eltVar uq             -- resulting element variable
+              bBind     = bindStmt bVar fApp    -- bind result
               bodyStmts = [bBind] -- body block is just assignment
+
               -- LOOP
-              loop = addArg fVar (toDyn f)
-                   $ addStmts bodyStmts bodyLbl
-                   $ arr_loop
+              loop      = setArrResultOnly uq
+                        $ addArg fVar (toDyn f)
+                        $ addStmts bodyStmts bodyLbl
+                        $ rebindIndexAndLengthVars uq arr_uq
+                        $ arr_loop
           in  (loop, uq)
+
     fuse' (ZipWith2 f arr brr) uq
-        = let (arr_loop, aUq) = fuse' arr uq
-              (brr_loop, bUq) = fuse' brr uq
-              aVar = eltVar aUq
-              bVar = eltVar bUq
+        = let (arr_loop, arr_uq) = fuse' arr uq
+              (brr_loop, brr_uq) = fuse' brr uq
+              aVar      = eltVar arr_uq
+              bVar      = eltVar brr_uq
               abrr_loop = arr_loop `Loop.append` brr_loop
+
               -- BODY
-              cVar = eltVar uq
-              fVar = var "f" uq
-              fApp = App2 fVar aVar bVar
-              cBind = bindStmt cVar fApp
+              cVar      = eltVar uq
+              fVar      = var "f" uq
+              fApp      = App2 fVar aVar bVar
+              cBind     = bindStmt cVar fApp
               bodyStmts = [cBind]
-              loop = addArg fVar (toDyn f)
-                   $ addStmts bodyStmts bodyLbl
-                   $ abrr_loop
+
+              -- LOOP
+              loop      = setArrResultOnly uq
+                        $ addArg fVar (toDyn f)
+                        $ addStmts bodyStmts bodyLbl
+                        $ rebindIndexAndLengthVars uq arr_uq -- be careful: arbitrary choice between a and b
+                        $ abrr_loop
           in  (loop, uq)
+
     fuse' (Filter2 p arr) uq
-        = let (arr_loop, a_uq) = fuse' arr uq
-              aVar      = eltVar a_uq
+        = let (arr_loop, arr_uq) = fuse' arr uq
+              aVar      = eltVar arr_uq
+
+              -- INIT
+              ixVar     = indexVar uq                 -- writing index
+              ixInit    = bindStmt ixVar (IntLit 0)    -- index initialization
+              initStmts = [ixInit]
+
               -- BODY
               pVar      = var "p" uq
               pApp      = App1 pVar aVar
@@ -190,17 +215,32 @@ fuse env = fuse'
               -- NOTE: This will bug out if there are more guards
               --       or anything else important in the remainder of the body
               bodyStmts = [boolBind, guard, resBind]
+
+              -- WRITE
+              -- WARNING: Assignment statement preceeds the array write stmt (added in the postprocess step)
+              --          It it fine with the current semantics as the unupdated index will be used,
+              --          however this is error prone and may not be true with code gens other than HsCodeGen.
+              oneVar    = var "one" uq
+              oneBind   = bindStmt oneVar (IntLit 1)  -- index step
+              ixUpdate  = assignStmt ixVar (App2 plusFn ixVar oneVar)
+              writeStmts  = [oneBind, ixUpdate]
+
               -- LOOP
-              loop = addArg pVar (toDyn p)
-                   $ addStmts bodyStmts bodyLbl
-                   $ arr_loop
+              loop      = setArrResultOnly uq
+                        $ addArg pVar (toDyn p)
+                        $ addStmts initStmts initLbl
+                        $ addStmts bodyStmts bodyLbl
+                        $ addStmts writeStmts writeLbl
+                        -- Note that we aren't rebinding index since read/write indexes are not the same with Filter
+                        $ rebindLengthVar uq arr_uq
+                        $ arr_loop
           in  (loop, uq)
 
     fuse' (Scan2 f z arr) uq
-        = let (arr_loop, a_uq) = fuse' arr uq
-              aVar = eltVar a_uq
-              fVar = var "f" uq
-              zVar = var "z" uq
+        = let (arr_loop, arr_uq) = fuse' arr uq
+              aVar      = eltVar arr_uq
+              fVar      = var "f" uq
+              zVar      = var "z" uq
               -- INIT
               accVar    = var "acc" uq                -- accumulator
               accInit   = bindStmt accVar (VarE zVar)  -- accum initialization
@@ -210,18 +250,37 @@ fuse env = fuse'
               bBind     = bindStmt bVar (VarE accVar) -- resulting element in current accum
               bodyStmts = [bBind]
               -- BOTTOM
-              fApp = App2 fVar accVar aVar
+              fApp      = App2 fVar accVar aVar
               accUpdate = assignStmt accVar fApp
-              botStmts = [accUpdate]
+              botStmts  = [accUpdate]
               -- LOOP
-              loop = addArg fVar (toDyn f)
-                   $ addArg zVar (toDyn z)
-                   $ addStmts initStmts initLbl
-                   $ addStmts bodyStmts bodyLbl
-                   $ addStmts botStmts  bottomLbl
-                   $ arr_loop
+              loop      = setArrResult uq
+                        $ setScalarResult accVar
+                        $ addArg fVar (toDyn f)
+                        $ addArg zVar (toDyn z)
+                        $ addStmts initStmts initLbl
+                        $ addStmts bodyStmts bodyLbl
+                        $ addStmts botStmts  bottomLbl
+                        $ rebindIndexAndLengthVars uq arr_uq
+                        $ arr_loop
           in  (loop, uq)
 
+
+-- | Sets the upper bound of an array to be the same as that
+--   of another array.
+rebindLengthVar :: Unique -> Unique -> Loop -> Loop
+rebindLengthVar nu old = addStmt stmt initLbl
+  where stmt = bindStmt (lengthVar nu) (VarE $ lengthVar old)
+
+
+rebindIndexVar :: Unique -> Unique -> Loop -> Loop
+rebindIndexVar nu old = addStmt stmt initLbl
+  where stmt = bindStmt (indexVar nu) (VarE $ indexVar old)
+
+
+rebindIndexAndLengthVars :: Unique -> Unique -> Loop -> Loop
+rebindIndexAndLengthVars nu old = rebindLengthVar nu old
+                                . rebindIndexVar nu old
 
 
 {-
@@ -370,14 +429,18 @@ loadSourceGhc path = let
 -------------- Tests -------------------------
 fl = Data.LiveFusion.Combinators.fromList
 
+
 example0 :: ArrayAST Int
 example0 = ZipWith (+)
         (fl [1,2,3])
       $ Scan (+) 0 $ Filter (const True) $ Map (+1) $ fl [4,5,6]
 
+
 loop0 = postprocessLoop $ unsafePerformIO $ fuseToLoop example0
 
+
 block0 lbl = loopBlockMap loop0 ! lbl
+
 
 test0 :: IO ()
 test0 = putStrLn
@@ -386,6 +449,7 @@ test0 = putStrLn
   where
     codeGenBlock lbl = cgBlock (extendedEnv loop0) (block0 lbl)
     allBlocks        = Map.keys $ loopBlockMap loop0
+
 
 {-
 runTests = do

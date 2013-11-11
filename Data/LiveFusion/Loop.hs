@@ -36,6 +36,15 @@ eltVar = var "elt"
 indexVar :: Id -> Var
 indexVar = var "ix"
 
+lengthVar :: Id -> Var
+lengthVar = var "len"
+
+arrayVar :: Id -> Var
+arrayVar = var "arr"
+
+resultVar :: Var
+resultVar = SimplVar "result"
+
 ltFn = SimplVar "(<)"
 plusFn = SimplVar "(+)"
 lengthFn = SimplVar "length"
@@ -55,21 +64,42 @@ data Stmt = Bind Var Expr
           | Case Var Label Label
           | Guard Var Label
           | Goto Label
+          -- Array statements.
+          -- They are here because they are stateful operations.
+          -- Perhaps there is a cleaner way to do this.
+          | NewArray Var {- Array name -}
+                     Var {- Array length -}
+          | WriteArray Var {- Array name -}
+                       Var {- Index -}
+                       Var {- Element -}
+          | SliceArray Var {- New array name (TODO: ugly) -}
+                       Var {- Array name -}
+                       Var {- Array length -}
+          | Return Var
 
-bindStmt = Bind
-assignStmt = Assign
-caseStmt = Case
-guardStmt = Guard
-gotoStmt = Goto
+
+bindStmt     = Bind
+assignStmt   = Assign
+caseStmt     = Case
+guardStmt    = Guard
+gotoStmt     = Goto
+newArrStmt   = NewArray
+writeArrStmt = WriteArray
+sliceArrStmt = SliceArray
+returnStmt   = Return
 
 data Loop = Loop { -- | Global arguments and their values
-                   loopArgs   :: (Map Var Arg)
+                   loopArgs         :: (Map Var Arg)
 
-                   -- | List of requested manifest arrays
-                 , loopResults    :: [Var]
+                   -- | Resulting manifest array
+                 , loopArrResult    :: Maybe Id  -- May not be the best way to represent this,
+                                                 -- but currently the easiest
+
+                   -- | Resulting scalar result
+                 , loopScalarResult :: Maybe Var
 
                    -- | List of goto code loopBlockMap
-                 , loopBlockMap :: BlockMap
+                 , loopBlockMap     :: BlockMap
                  }
 
 
@@ -101,6 +131,46 @@ putBlock blk@(Block lbl _) loop = loop { loopBlockMap = loopBlockMap' }
     loopBlockMap' = Map.insert lbl blk (loopBlockMap loop)
 
 
+--------------------------------------------------------------------------------
+-- | Scalar and Array results manipulation
+
+
+setArrResultImpl :: Maybe Id -> Loop -> Loop
+setArrResultImpl mbId loop = loop { loopArrResult = mbId }
+
+
+setArrResult :: Id -> Loop -> Loop
+setArrResult i = setArrResultImpl (Just i)
+
+
+unsetArrResult :: Loop -> Loop
+unsetArrResult = setArrResultImpl Nothing
+
+
+setScalarResultImpl :: Maybe Var -> Loop -> Loop
+setScalarResultImpl mbVar loop = loop { loopScalarResult = mbVar }
+
+
+setScalarResult :: Var -> Loop -> Loop
+setScalarResult v = setScalarResultImpl (Just v)
+
+
+unsetScalarResult :: Loop -> Loop
+unsetScalarResult = setScalarResultImpl Nothing
+
+
+-- | Unsets scalar result along the way.
+setArrResultOnly :: Id -> Loop -> Loop
+setArrResultOnly i = unsetScalarResult
+                   . setArrResult i
+
+--------------------------------------------------------------------------------
+
+
+--------------------------------------------------------------------------------
+-- | Statements
+--------------------------------------------------------------------------------
+
 addStmtsToBlock :: [Stmt] -> Block -> Block
 addStmtsToBlock stmts (Block lbl stmts0) = Block lbl (stmts0 ++ stmts)
 
@@ -113,6 +183,11 @@ addStmt stmt lbl = updateBlock lbl (addStmtsToBlock [stmt])
 addStmts :: [Stmt] -> Label -> Loop -> Loop
 addStmts stmts lbl = updateBlock lbl (addStmtsToBlock stmts)
 
+--------------------------------------------------------------------------------
+
+
+--------------------------------------------------------------------------------
+-- | Pretty printing
 
 pprBlockMap :: BlockMap -> String
 pprBlockMap = concatMap pprBlock . Map.elems
@@ -132,36 +207,47 @@ pprStmt (Case p l1 l2) = "if " ++ pprVar p ++
                          " then " ++ pprLabel l1 ++
                          " else " ++ pprLabel l2
 pprStmt (Goto l)       = "goto " ++ pprLabel l
-
+pprStmt _              = "Unknown Stmt"
 
 pprLabel :: Label -> String
 pprLabel = id
 
 
 instance Show Loop where
-  show (Loop loopArgs loopResults loopBlockMap)
-    = "Loop LoopArgs:   " ++ (show $ Map.keys loopArgs) ++\
-      "     LoopResults:    " ++ show loopResults ++\
-      "     LoopBlockMap: " ++\ pprBlockMap loopBlockMap
+  show (Loop loopArgs loopArrResult loopScalarResult loopBlockMap)
+    = "Loop Args:   "        ++ (show $ Map.keys loopArgs) ++\
+      "     Array Result: "  ++ maybe "None" show loopArrResult ++\
+      "     Scalar Result: " ++ maybe "None" show loopScalarResult ++\
+      "     BlockMap: "  ++\ pprBlockMap loopBlockMap
+
+
+pprVarMap :: VarMap -> String
+pprVarMap = ("Transitive Variable Map:" ++\)
+          . unlines . map pprVarMapEntry . Map.assocs
+  where
+    pprVarMapEntry (lbl,vars) = lbl ++ ": " ++ show vars
+
+
+
+--------------------------------------------------------------------------------
 
 
 addArg var arg loop = loop { loopArgs = loopArgs' }
   where loopArgs' = Map.insert var arg (loopArgs loop)
 
 
-addLoopResults arrVar loop = loop { loopResults = loopResults' }
-  where loopResults' = arrVar : (loopResults loop)
 
-
+--------------------------------------------------------------------------------
 -- | Several predefined labels
+
 initLbl :: Label
 initLbl = "init"
 
 guardLbl :: Label
 guardLbl = "guard"
 
---readLbl :: Label
---readLbl = "read"
+writeLbl :: Label
+writeLbl = "write"
 
 bodyLbl :: Label
 bodyLbl = "body"
@@ -171,6 +257,12 @@ bottomLbl = "bottom"
 
 doneLbl :: Label
 doneLbl = "done"
+
+--------------------------------------------------------------------------------
+
+
+--------------------------------------------------------------------------------
+-- | Environment
 
 
 -- | Per block environment which tracks the variables that the block
@@ -286,6 +378,10 @@ blockEnv blk = foldl (flip analyse) emptyEnv (blockStmts blk)
     analyse (Case v lt lf) = assume v >>> adoptBlock lt >>> adoptBlock lf
     analyse (Guard p lf)   = assume p >>> adoptBlock lf
     analyse (Goto l)       = adoptBlock l
+    analyse (NewArray arr n)        = assume n >>> declare arr
+    analyse (WriteArray arr i x)    = assumeMany [arr, i, x]
+    analyse (SliceArray arr' arr n) = assume arr >>> assume n >>> declare arr'
+    analyse (Return v)     = assume v
 
 
 -- | Transitive environment envAssumptions
@@ -342,51 +438,57 @@ extendedEnv loop = purgeBlockLocalVars
         in  resultMap
 
 
-pprVarMap :: VarMap -> String
-pprVarMap = ("Transitive Variable Map:" ++\)
-          . unlines . map pprVarMapEntry . Map.assocs
-  where
-    pprVarMapEntry (lbl,vars) = lbl ++ ": " ++ show vars
+--------------------------------------------------------------------------------
 
 
 -- | Inserts known Gotos between several of the predefined blocks
 postprocessLoop :: Loop -> Loop
 postprocessLoop
+  = insertControlFlow
+  . insertResultArray
+
+insertControlFlow :: Loop -> Loop
+insertControlFlow
   = addStmt (gotoStmt guardLbl)  initLbl    -- Init -> Guard
   . addStmt (gotoStmt bodyLbl)   guardLbl   -- Guard -> Body
-  . addStmt (gotoStmt bottomLbl) bodyLbl    -- Body -> Bottom
+  . addStmt (gotoStmt writeLbl) bodyLbl     -- Body -> Write
+  . addStmt (gotoStmt bottomLbl) writeLbl    -- Body -> Write
   . addStmt (gotoStmt guardLbl)  bottomLbl  -- Bottom -> Guard
 
+insertResultArray :: Loop -> Loop
+insertResultArray loop
+  | Just uq <- loopArrResult loop
+  = let alloc      = newArrStmt arr bound
+        write      = writeArrStmt arr ix elt
+        slice      = sliceArrStmt resultVar arr ix
+        ret        = returnStmt resultVar
 
--- Guard which causes the end of loop on failure (like break)
---addExitGuard cond = addGuard cond (Var "done") -- TODO: add a common set of labels
+        arr        = arrayVar  uq
+        bound      = lengthVar uq
+        ix         = indexVar  uq
+        elt        = eltVar    uq
 
--- Guard which skips iteration on failure (like continue)
---addSkipGuard cond = addGuard cond (Var "skip")
+        process = addStmt alloc initLbl
+              >>> addStmt write writeLbl
+              >>> addStmt slice doneLbl
+              >>> addStmt ret   doneLbl
 
--- A guard with the specified condition and the failure label
---addGuard cond onfail loop = loop { guards = guards' }
---  where guards' = (guards loop) `List.union` [(cond, onfail)] -- guards are ordered
-
-
---setLen n loop = loop { len = len' }
---  where curr  = len loop
---        len'  | curr == 0  = n
---              | otherwise = n `min` curr
+    in  process loop
 
 
 instance Monoid Loop where
-  mempty = Loop Map.empty [] Map.empty
+  mempty = Loop Map.empty Nothing Nothing Map.empty
   mappend loop1 loop2
-    = Loop { loopArgs    = loopArgs    `joinBy` Map.union
-           , loopResults = loopResults `joinBy` List.union
-           , loopBlockMap  = loopBlockMap  `joinBy` Map.unionWith appendLoopBlockMap
+    = Loop { loopArgs         = loopArgs     `joinWith` Map.union
+           , loopArrResult    = Nothing
+           , loopScalarResult = Nothing
+           , loopBlockMap     = loopBlockMap `joinWith` Map.unionWith appendLoopBlockMap
            }
     where
-      joinBy :: (Loop  -> field)          -- field to take from loop
-             -> (field -> field -> field) -- joining function
-             -> field                    -- new field
-      field `joinBy` f = f (field loop1) (field loop2)
+      joinWith :: (Loop  -> field)          -- field to take from loop
+               -> (field -> field -> field) -- joining function
+               -> field                    -- new field
+      field `joinWith` f = f (field loop1) (field loop2)
 
 
 append :: Loop -> Loop -> Loop

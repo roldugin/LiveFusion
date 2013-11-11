@@ -36,13 +36,13 @@ cgBlock emap blk@(Block lbl stmts) = blockFun
 toTHStmt :: VarMap -> [Var] -> Lp.Stmt -> TH.Stmt
 toTHStmt _ _ (Bind v e)
   = let thExp = toTHExp e
-        thVar  = VarP $ thName v
+        thVar  = BangP $ VarP $ thName v
         thStmt = LetS [ValD thVar (NormalB thExp) [{-no where clause-}]]
     in  thStmt
 
 toTHStmt _ _ (Assign v e)
   = let thExp = toTHExp e
-        thVar  = VarP $ thDirtyName v
+        thVar  = BangP $ VarP $ thDirtyName v
         thStmt = LetS [ValD thVar (NormalB thExp) [{-no where clause-}]]
     in  thStmt
 
@@ -62,6 +62,36 @@ toTHStmt emap dirtyVars (Guard pred onFailLbl)
 
 toTHStmt emap dirtyVars (Goto lbl)
   = NoBindS $ goto emap dirtyVars lbl
+
+toTHStmt _ _ (NewArray arr n)
+  = let thStmt = BindS (BangP $ VarP $ thName arr)
+                       (TH.AppE newArrayFn len)
+        newArrayFn = TH.VarE $ mkName "newArray"
+        len = toTHVarE n
+    in  thStmt
+
+toTHStmt _ _ (WriteArray arr i x)
+  = let thStmt = NoBindS $ TH.AppE (TH.AppE (TH.AppE writeArrayFn arr_th) i_th) x_th
+        writeArrayFn = TH.VarE $ mkName "newArray"
+        arr_th = toTHVarE arr
+        i_th   = toTHVarE i
+        x_th   = toTHVarE x
+    in  thStmt
+
+toTHStmt _ _ (SliceArray arr' arr n)
+  = let thStmt = BindS (BangP $ VarP $ thName arr')
+                       (TH.AppE (TH.AppE sliceArrayFn arr_th) n_th)
+        sliceArrayFn = TH.VarE $ mkName "sliceArray"
+        arr_th = toTHVarE arr
+        n_th   = toTHVarE n
+    in  thStmt
+
+toTHStmt _ _ (Return v)
+  = let thStmt   = NoBindS $ TH.AppE returnFn v_th
+        returnFn = TH.VarE $ mkName "return"
+        v_th     = toTHVarE v
+    in  thStmt
+
 
 
 goto :: VarMap -> [Var] -> Label -> TH.Exp
