@@ -56,7 +56,7 @@ toTHStmt emap dirtyVars (Case pred tLbl fLbl)
 toTHStmt emap dirtyVars (Guard pred onFailLbl)
   = let thPredExp = toTHExp (Lp.VarE pred)
         thGotoExp = goto emap dirtyVars onFailLbl
-        unlessFn = TH.VarE $ mkName "Control.Monad.unless"
+        unlessFn = TH.VarE $ mkName "unless"
         thStmt = NoBindS $ TH.AppE (TH.AppE unlessFn thPredExp) thGotoExp
     in  thStmt
 
@@ -72,7 +72,7 @@ toTHStmt _ _ (NewArray arr n)
 
 toTHStmt _ _ (WriteArray arr i x)
   = let thStmt = NoBindS $ TH.AppE (TH.AppE (TH.AppE writeArrayFn arr_th) i_th) x_th
-        writeArrayFn = TH.VarE $ mkName "newArray"
+        writeArrayFn = TH.VarE $ mkName "writeArray"
         arr_th = toTHVarE arr
         i_th   = toTHVarE i
         x_th   = toTHVarE x

@@ -47,8 +47,8 @@ resultVar = SimplVar "result"
 
 ltFn = SimplVar "(<)"
 plusFn = SimplVar "(+)"
-lengthFn = SimplVar "length"
-readFn = SimplVar "unsafeIndex"
+lengthFn = SimplVar "lengthArray"
+readFn = SimplVar "readArray"
 
 type Arg   = Dynamic
 
@@ -241,22 +241,22 @@ addArg var arg loop = loop { loopArgs = loopArgs' }
 -- | Several predefined labels
 
 initLbl :: Label
-initLbl = "init"
+initLbl = "init_"
 
 guardLbl :: Label
-guardLbl = "guard"
+guardLbl = "guard_"
 
 writeLbl :: Label
-writeLbl = "write"
+writeLbl = "write_"
 
 bodyLbl :: Label
-bodyLbl = "body"
+bodyLbl = "body_"
 
 bottomLbl :: Label
-bottomLbl = "bottom"
+bottomLbl = "bottom_"
 
 doneLbl :: Label
-doneLbl = "done"
+doneLbl = "done_"
 
 --------------------------------------------------------------------------------
 
@@ -445,7 +445,9 @@ extendedEnv loop = purgeBlockLocalVars
 postprocessLoop :: Loop -> Loop
 postprocessLoop
   = insertControlFlow
+  . reorderDecls
   . insertResultArray
+
 
 insertControlFlow :: Loop -> Loop
 insertControlFlow
@@ -454,6 +456,7 @@ insertControlFlow
   . addStmt (gotoStmt writeLbl) bodyLbl     -- Body -> Write
   . addStmt (gotoStmt bottomLbl) writeLbl    -- Body -> Write
   . addStmt (gotoStmt guardLbl)  bottomLbl  -- Bottom -> Guard
+
 
 insertResultArray :: Loop -> Loop
 insertResultArray loop
@@ -475,6 +478,29 @@ insertResultArray loop
 
     in  process loop
 
+
+-- | All declarations must go first in the block.
+--
+--   Otherwise, some of them may not even be in scope when they are req'd.
+--   E.g. when a jump on a guard occurs.
+--
+--   TODO: Explain this better, sketchy explanation follows.
+--         This happens because a block is aggregated from statements coming
+--         from different places. So decalarations and control flow are interleaved.
+--         However, as soon as control flow occurs it may need all of the variables
+--         known to the block. This won't be possible if the declaration comes after
+--         the control transfer.
+reorderDecls :: Loop -> Loop
+reorderDecls loop = loop { loopBlockMap = Map.map perblock (loopBlockMap loop) }
+  where
+    perblock (Block lbl stmts) = Block lbl (reorder stmts)
+
+    reorder = uncurry (++)
+            . partition isDecl
+
+    isDecl (Bind _ _) = True
+    isDecl (Assign _ _) = True
+    isDecl _ = False
 
 instance Monoid Loop where
   mempty = Loop Map.empty Nothing Nothing Map.empty
