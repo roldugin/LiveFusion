@@ -14,11 +14,11 @@ Library
     Data.LiveFusion.Combinators
     Data.LiveFusion.Loop
     Data.LiveFusion.Util
-    --Data.LiveFusion.HsCodeGen
+    Data.LiveFusion.HsCodeGen
 
   Other-Modules:
 
   GHC-Options: -Odph
 
   Build-Depends:
-    base, containers, filepath, ghc-paths, ghc-prim, ghc >= 7.6, data-reify, vector
+    base, containers, filepath, ghc-paths, ghc-prim, ghc >= 7.6, data-reify, vector, template-haskell
