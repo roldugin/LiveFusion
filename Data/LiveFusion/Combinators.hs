@@ -3,7 +3,8 @@ module Data.LiveFusion.Combinators where
 
 import Data.LiveFusion.Loop as Loop
 import Data.LiveFusion.Util
-import Data.LiveFusion.HsCodeGen
+import Data.LiveFusion.HsEvaluator
+import Data.LiveFusion.HsCodeGen -- only for testing
 
 import qualified Data.Vector.Unboxed as V
 import Prelude hiding ( map, zip, filter, zipWith )
@@ -340,91 +341,22 @@ zip arr brr = Zip arr brr
 fromList :: Elt a => [a] -> ArrayAST a
 fromList = ArrLit . V.fromList
 
-{-
+
 eval :: Elt a => ArrayAST a -> V.Vector a
 eval (ArrLit vec) = vec
 eval op = evalAST op
 
 evalAST :: Typeable a => AST a -> a
-evalAST = unsafePerformIO . evalIO
+evalAST ast = result
+  where
+    loop = getLoop ast
+    dynResult = evalLoop loop
+    result = fromJust $ fromDynamic dynResult
 {-# NOINLINE evalAST #-}
 
-evalIO :: Typeable a => AST a -> IO a
-evalIO ast = do
-  (pluginPath, h, moduleName) <- openTempModuleFile
-  let entryFnName  = "entry" ++ moduleName
-  (code, args) <- pluginCode ast moduleName entryFnName
-  dump code h
-  pluginEntry <- compileAndLoad pluginPath moduleName entryFnName
-  let result = pluginEntry args
-  return $ fromJust $ fromDynamic result
-{-# NOINLINE evalIO #-}
-
-dump :: String -> Handle -> IO ()
-dump code h = hPutStrLn h code >> hClose h
--}
-openTempModuleFile :: IO (FilePath, Handle, String)
-openTempModuleFile = do
-  (fp, h) <- openTempFile "/tmp/" "Plugin.hs" -- TODO: Make cross-platform
-  let moduleName = takeBaseName fp
-  return (fp, h, moduleName)
-{-
-compileAndLoad :: FilePath -> String -> String -> IO ([Arg] -> Arg)
-compileAndLoad hsFilePath moduleName entryFnName =
-    defaultErrorHandler defaultFatalMessager defaultFlushOut $ do
-      runGhc (Just libdir) $ do
-        dflags <- getSessionDynFlags
-        setSessionDynFlags dflags
-        target <- guessTarget hsFilePath Nothing
-        setTargets [target]
-        r <- load LoadAllTargets
-        case r of
-          Failed    -> error "Compilation failed"
-          Succeeded -> do
-            setContext [IIDecl $ simpleImportDecl (mkModuleName moduleName)]
-            pluginEntry <- compileExpr (moduleName ++ "." ++ entryFnName)
-            let pluginEntry' = unsafeCoerce pluginEntry :: [Arg] -> Arg
-            return pluginEntry'
--}
-{-
-execFnGhc :: String -> String -> HscEnv -> Ghc HValue
-execFnGhc modname fn ses = do
-        mod <- findModule (mkModuleName modname) Nothing
-        --setContext [mod]
-        --unafePerformIO $ putStrLn (moduleNameString $ moduleName mod)
-        setSession ses
-        compileExpr (modname ++ "." ++ fn)
--}
-{-
-hello :: IO HValue
-hello = do
-    (err, ses) <- compileAndLoadPlugin
-    result <- execFnGhc "Plugin" "getInt" ses
-    return result
--}
-{-
-loadSourceGhc :: String -> Ghc (Maybe String)
-loadSourceGhc path = let
-        throwingLogger (Just e) = throw e
-        throwingLogger _ = return ()
-    in do
-        dflags <- getSessionDynFlags
-        setSessionDynFlags (dflags{
-            ghcLink = LinkInMemory,df            hscTarget = HscInterpreted,
-            packageFlags = [ExposePackage "ghc"]
-            })
-        target <- guessTarget path Nothing
-        addTarget target
-        r <- loadWithLogger throwingLogger LoadAllTargets
-        case r of
-            Failed    -> return $ Just "Generic module load error"
-            Succeeded -> return Nothing
-
-        `gcatch` \(e :: SourceError) -> let
-                errors e = concat $ P.map show (bagToList $ srcErrorMessages e)
-            in
-                return $ Just (errors e)
--}
+getLoop :: Typeable a => AST a -> Loop
+getLoop = postprocessLoop . unsafePerformIO . fuseToLoop
+{-# NOINLINE getLoop #-}
 
 -------------- Tests -------------------------
 fl = Data.LiveFusion.Combinators.fromList
@@ -436,20 +368,8 @@ example0 = ZipWith (+)
       $ Scan (+) 0 $ Filter (const True) $ Map (+1) $ fl [4,5,6]
 
 
-loop0 = postprocessLoop $ unsafePerformIO $ fuseToLoop example0
-
-
-block0 lbl = loopBlockMap loop0 ! lbl
-
-
 test0 :: IO ()
-test0 = putStrLn
-      $ pprint
-      $ List.map codeGenBlock allBlocks
-  where
-    codeGenBlock lbl = cgBlock (extendedEnv loop0) (block0 lbl)
-    allBlocks        = Map.keys $ loopBlockMap loop0
-
+test0 = print $ eval example0
 
 {-
 runTests = do

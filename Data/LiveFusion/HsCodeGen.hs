@@ -9,10 +9,19 @@ import Data.LiveFusion.Loop as Lp
 
 import Language.Haskell.TH as TH
 
-import Data.Dynamic
 import Data.Map ( Map, (!) )
 import qualified Data.Map as Map
 import Data.List
+import Data.Functor.Identity
+import System.IO.Unsafe ( unsafePerformIO )
+
+
+-- Modules required for code generation
+import qualified Data.Vector.Unboxed as V
+import qualified Data.Vector.Unboxed.Mutable as MV
+import Control.Monad.ST.Strict
+import Control.Monad.Primitive
+import Data.Dynamic
 
 -- | Generate a TH function represeting a code block of a loop.
 --
@@ -111,7 +120,7 @@ toTHStmt _ _ (Return v)
 
 
 goto :: VarMap -> [Var] -> Label -> TH.Exp
-goto emap dirtyVars lbl = foldl TH.AppE thFName thArgs
+goto emap dirtyVars lbl = applyMany thFName thArgs
   where
     args    = emap ! lbl
 
@@ -124,6 +133,14 @@ goto emap dirtyVars lbl = foldl TH.AppE thFName thArgs
     toTHName v | v `elem` dirtyVars = thDirtyName v
                | otherwise          = thName v
 
+
+-- | Takes a list of expressions and applies them one after the other
+applyMany1 :: [TH.Exp] -> TH.Exp
+applyMany1 [] = error "applyMany: Nothing to apply"
+applyMany1 exps = foldl1 TH.AppE exps
+
+applyMany :: TH.Exp -> [TH.Exp] -> TH.Exp
+applyMany fun exps = applyMany1 (fun : exps)
 
 -- | Turn a Loop toTHExpession to a TH toTHExpession.
 --
@@ -166,139 +183,63 @@ thDirtyName :: Lp.Var -> TH.Name
 thDirtyName = TH.mkName . (++ "'") . Lp.pprVar
 
 
-{-
-pluginEntryCode :: String -> TypeRep -> Var -> Loop -> (String, [Arg])
-pluginEntryCode entryFnName resultType resultVar loop
-  = let code = entryFnName ++ " :: [Dynamic] -> Dynamic" ++\
-               entryFnName `space` argsMatch ++\
-               "  = toDyn $ runST $ loopST " ++ argsPass ++\
-               " " ++\
-               lSTCode
-    in  (code, Map.elems pluginArgs)
+defaultPluginCode :: Loop -> String
+defaultPluginCode = pluginCode "Plugin" "entry"
+
+
+pluginCode :: String -> String -> Loop -> String
+pluginCode moduleName entryFnName loop
+  = preamble moduleName              ++\
+    pluginEntryCode entryFnName loop ++\
+    loopCode loop
+
+
+pluginEntryCode :: String -> Loop -> String
+pluginEntryCode entryFnName loop
+  = pprint [fnSig, fnDefn]
   where
-    pluginArgs = args loop
-    argVars  = Map.keys pluginArgs
-    lSTCode   = loopSTCode resultType resultVar loop
-    argsMatch = showStringList $ map pprVar argVars  -- "[map_f1, arr2, ...]"
-    argsPass  = juxtMap coerceArg argVars            -- "(fd map_f1) (fd arr2) ... "
-    coerceArg = paren . ("fd "++) . pprVar            -- "(fd map_f1)"
+    fnSig     = SigD fnName fnTy
+    fnDefn    = FunD fnName [Clause [argList] (NormalB loopCall) []]
+
+    fnName    = mkName entryFnName         -- E.g. entry_
+
+    fnTy      = dynListTy `to` dynTy       -- [Dynamic] -> Dynamic
+
+    dynTy     = ConT $ mkName "Dynamic"    -- [Dynamic]
+    dynListTy = AppT ListT dynTy           -- Dynamic
+
+    -- | Makes a type for (ty1 -> ty2)
+    to :: Type -> Type -> Type
+    ty1 `to` ty2 = AppT (AppT ArrowT ty1) ty2
+
+    -- [!f1, !f2, !arr1, ...]
+    argList   = ListP
+              $ map (BangP . VarP . thName) argVars
+
+    -- (fd f1) (fd f2) (fd arr1) ...
+    loopCall  = toDynamic
+              $ applyMany loopEntry
+              $ map (coerceArg . TH.VarE . thName) argVars
+
+    -- Applies the arg to fd function (fromDynamic, expected to be in scope)
+    coerceArg = AppE (TH.VarE $ mkName "fd")
+
+    toDynamic = AppE (TH.VarE $ mkName "toDyn")
+
+    -- E.g. init_
+    loopEntry = TH.VarE $ mkName initLbl
+
+    argVars   = Map.keys $ loopArgs loop
 
 
-loopSTCode :: TypeRep -> Var -> Loop -> String
-loopSTCode resultTy resultVar (Loop args state binds guards len)
-  = "loopST :: " ++ argsTypes ++ " -> ST s " ++ (paren $ show resultTy) ++\
-    "loopST " ++ pluginArgsList ++ " ="     ++\
-    "  do {"                          ++\
-    "    dst  <- MV.new n"            ++:\  -- allocate an array of same size as the smallest input array
-    "    len  <- loop dst 0 0"        ++:\  -- perform the traversal
-    "    let { dst2 = MV.unsafeTake len dst }" ++:\  -- only take the filled portion of the result array
-    "    dst3 <- V.unsafeFreeze dst2" ++:\  -- turn mutable array into immutable w/out copying
-    "    return dst3 }" ++\
-    "  where {" ++\
-    "    n = " ++ (show len) ++:\
-    "    loop " ++ loopArgsList ++ " =" ++\
-    "      = let {" ++\
-               indent 5 letsCode ++\
-    "        } in " ++\
-    "        do {" ++\
-    "          guards" ++\
-    "        }" ++:\
-    "      False -> return o }}"
+
+loopCode :: Loop -> String
+loopCode loop = pprint
+              $ map codeGenBlock allBlocks
   where
-    (argVars, argVals) = unzip $ Map.toList args
-    argsTypes      = intercalate " -> "
-                   $ map (paren . show . dynTypeRep) argVals
-    pluginArgsList = intercalate " "
-                   $ map pprVar argVars
-    loopArgsList   = intercalate " "
-                   $ map pprVar
-                   $ map fst3 state
-    letsCode       = intercalate ";\n"
-                   $ concat [ stateUpdateCode state
-                            , bindsCode binds
-                            , guardsCode guards
-                            , [skipCode]
-                            , [yieldCode resultVar]
-                            ]
-    guardsCode'    = guardsCode guards
-    fst3 (a,_,_)   = a
-
-stateInitCode :: [(Var,ToTHExp,ToTHExp)] -> [String]
-stateInitCode = map bind
-  where
-    bind (var,toTHExp,_) = (pprVar var) ++ " <- " ++ (pprToTHExp toTHExp)
-
-
---stateArgs :: [State] -> (String, Var)
---
-
-stateUpdateCode :: [(Var,ToTHExp,ToTHExp)] -> [String]
-stateUpdateCode map = []
-
-
-skipCode :: String
-skipCode = "skip = loop dst (i+1) o"
-
-
-yieldCode :: Var -> String
-yieldCode resultVar
-  = "yield = do {" ++\
-    "  MV.unsafeWrite dst o " ++ pprVar resultVar ++:\
-    "  loop dst (i+1) (o+1) }"
-
-
-guardsCode :: [(ToTHExp,Var)] -> [String]
-guardsCode guards
-  = let (codes, first) = guardsCode' 1 guards
-        entry = "guards = " ++ pprVar first -- `guard = yield' in case of no guards
-    in  entry:codes
-  where
-    guardsCode' _ [] = ([], Var "yield")
-    guardsCode' n (grd : rest)
-      = let (codes, cont) = guardsCode' (n+1) rest
-            label = Var $ "guard" ++ show n
-            code  = guardCode label grd cont
-        in  (code:codes, label)
-    guardCode label (predicate,onfail) cont
-      = pprVar label ++ " = case " ++ pprToTHExp predicate ++ " of " ++
-        "{ False -> " ++ pprVar onfail ++ "; True -> " ++ pprVar cont ++ " }"
-
-
-bindsCode :: (Map Var ToTHExp) -> [String]
-bindsCode = map bindCode . Map.toList
-  where bindCode (var, toTHExp) = (pprVar var) ++ " = " ++ (pprToTHExp toTHExp)
-
-
---------------------------------------------------------------------------------
--- ToTHExpessions commonly used in loops ------------------------------------------
-
--- TODO: These should be independent of the code generation backend.
-
--- | Read an element from an array
-readArrayToTHExp :: Var -> Var -> ToTHExp
-readArrayToTHExp arr ix = App2 reader arr ix
-  where reader = Var "readArray"
-
-
--- | Write an element to an array
-writeArrayToTHExp :: Var -> Var -> Var -> ToTHExp
-writeArrayToTHExp arr ix elt = App3 writer arr ix elt
-  where writer = Var "writeArray"
-
-
-ltToTHExp :: Var -> Var -> ToTHExp
-ltToTHExp a b = App2 op a b
-  where op = Var "(<)"
-
-
-newArrayToTHExp :: Var -> ToTHExp
-newArrayToTHExp len = App1 allocator len
-  where allocator = Var "newArray"
-
-
-incrToTHExp :: Var -> ToTHExp
-incrToTHExp var = App1 incr var
-  where incr = Var "increment"
+    codeGenBlock = cgBlock extEnv
+    allBlocks    = Map.elems $ loopBlockMap loop
+    extEnv       = extendedEnv loop -- Environment after variable and goto analyses
 
 
 --------------------------------------------------------------------------------
@@ -306,29 +247,64 @@ incrToTHExp var = App1 incr var
 
 preamble :: String -> String
 preamble moduleName =
+  "{-# LANGUAGE BangPatterns #-}                                           " ++\
   "module " ++ moduleName ++ " where                                       " ++\
+  "                                                                        " ++\
   "import Data.Vector.Unboxed as V                                         " ++\
   "import Data.Vector.Unboxed.Mutable as MV                                " ++\
   "import Unsafe.Coerce                                                    " ++\
   "import Data.Dynamic                                                     " ++\
   "import GHC.Prim (Any)                                                   " ++\
   "import Control.Monad.ST                                                 " ++\
+  "import Control.Monad.Primitive                                          " ++\
   "                                                                        " ++\
   "fd :: Typeable a => Dynamic -> a                                        " ++\
   "fd d = case fromDynamic d of                                            " ++\
   "         Just v  -> v                                                   " ++\
   "         Nothing -> error \"Argument type mismatch\"                    " ++\
   "                                                                        " ++\
-  "increment :: Int -> Int                                                 " ++\
-  "increment = (+1)                                                        " ++\
+  "lengthArray :: Unbox a => V.Vector a -> Int                             " ++\
+  "lengthArray = V.length                                                  " ++\
   "                                                                        " ++\
-  "readArray :: Unbox a => V.Vector a -> Int -> a                          " ++\
-  "readArray arr i = V.unsafeIndex arr ix                                  " ++\
+  "readArray :: V.Unbox a => Int -> V.Vector a -> a                        " ++\
+  "readArray i arr = V.unsafeIndex arr i                                   " ++\
   "                                                                        " ++\
-  "writeArray :: Unbox a => MV.MVector s a -> Int -> a -> ST s ()          " ++\
+  "writeArray :: V.Unbox a => MV.MVector s a -> Int -> a -> ST s ()        " ++\
   "writeArray arr i x = MV.unsafeWrite arr i x                             " ++\
   "                                                                        " ++\
-  "newArray :: Unbox a => Int -> ST (MV.MVector s a)                       " ++\
+  "newArray :: V.Unbox a => Int -> ST s (MV.MVector s a)                   " ++\
   "newArray n = MV.new n                                                   " ++\
+  "                                                                        " ++\
+  "sliceArray :: (V.Unbox a, PrimMonad m) => MV.MVector (PrimState m) a -> Int -> m (V.Vector a) " ++\
+  "sliceArray vec len = V.unsafeFreeze $ MV.unsafeTake len vec             " ++\
   "                                                                        "
+
+
+-- The following generates fresh names, so avoid TH for now...
+{-
+helperFunctions :: [Dec]
+helperFunctions = unsafePerformIO $ runQ [d|
+
+  fd :: Typeable a => Dynamic -> a
+  fd d = case fromDynamic d of
+           Just v  -> v
+           Nothing -> error "Argument type mismatch"
+
+  lengthArray :: Unbox a => V.Vector a -> Int
+  lengthArray = V.length
+
+  readArray :: V.Unbox a => Int -> V.Vector a -> a
+  readArray i arr = V.unsafeIndex arr i
+
+  writeArray :: V.Unbox a => MV.MVector s a -> Int -> a -> ST s ()
+  writeArray arr i x = MV.unsafeWrite arr i x
+
+  newArray :: V.Unbox a => Int -> ST s (MV.MVector s a)
+  newArray n = MV.new n
+
+  sliceArray :: (V.Unbox a, PrimMonad m) => MV.MVector (PrimState m) a -> Int -> m (V.Vector a)
+  sliceArray vec len = V.unsafeFreeze $ MV.unsafeTake len vec
+
+  |]
+{-# NOINLINE helperFunctions #-}
 -}
