@@ -23,9 +23,9 @@ insert k v = modifyStor insert'
     insert' stor = case lookupIndex stor k of
                      Just i  -> adjustExisting i stor
                      Nothing -> insertNew stor
-    adjustExisting i = adjust i (addKey k)
+    adjustExisting i = adjust i (replaceVal)
     insertNew stor   = (Set.singleton k, v) : stor
-    addKey k (ks,v)  = (Set.insert k ks, v)
+    replaceVal       = second (const v)
 
 
 member :: Ord k => k -> FuzzyMap k a -> Bool
@@ -180,6 +180,7 @@ mergeWithKeys2 f f1 f2 m1 m2 = go m1 m2
               Just (ks2,v2) -> let kv = maybeToList $ f ks1 v1 ks2 v2
                                in  (only, kv ++ both)
               Nothing       -> (kv1:only, both)
+    process1 _ _ = ([],[])
 
     process2 m1 (kv2@(ks2,v2):m2)
       = let (only, both) = process2 m1 m2
@@ -187,10 +188,21 @@ mergeWithKeys2 f f1 f2 m1 m2 = go m1 m2
               Just (ks1,v1) -> let kv = maybeToList $ f ks1 v1 ks2 v2
                                in  (only, kv ++ both)
               Nothing       -> (kv2:only, both)
+    process2 _ _ = ([],[])
 
 
 intersects :: Ord a => Set a -> Set a -> Bool
 intersects s1 s2 = not $ Set.null $ Set.intersection s1 s2
+
+
+fromList :: Ord k => [(Set k, a)] -> FuzzyMap k a
+fromList = id
+
+fromList1 :: Ord k => [(k,a)] -> FuzzyMap k a
+fromList1 = fromListL . L.map (first return)
+
+fromListL :: Ord k => [([k],a)] -> FuzzyMap k a
+fromListL = fromList . L.map (first Set.fromList)
 
 
 -- Stor manipulation (legacy, will be removed)
