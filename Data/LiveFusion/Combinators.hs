@@ -133,7 +133,7 @@ fuse env = fuse'
               lenVar    = lengthVar uq
               lenBind   = bindStmt lenVar (App1 lengthFn arrVar)
               ixVar     = indexVar uq                 -- index
-              ixInit    = bindStmt ixVar (IntLit 0)    -- index initialization
+              ixInit    = bindStmt ixVar (IntLit 0)   -- index initialization
               initStmts = [ixInit, lenBind]
 
               -- BOTTOM
@@ -155,6 +155,9 @@ fuse env = fuse'
                         $ addStmts grdStmts   (guardLbl uq)
                         $ addStmts bodyStmts  (bodyLbl uq)
                         $ addStmts botStmts   (bottomLbl uq)
+                        $ addDefaultControlFlow uq
+                        $ setLoopEntry (initLbl uq)
+                        $ touchDefaultBlocks uq
                         $ Loop.empty
           in  (loop, uq) -- TODO return a result that maps an element of array
 
@@ -167,13 +170,15 @@ fuse env = fuse'
               fApp      = App1 fVar aVar        -- function application
               bVar      = eltVar uq             -- resulting element variable
               bBind     = bindStmt bVar fApp    -- bind result
-              bodyStmts = [bBind] -- body block is just assignment
+              bodyStmts = [bBind]               -- body block is just assignment
 
               -- LOOP
               loop      = setArrResultOnly uq
                         $ addArg fVar (toDyn f)
                         $ addStmts bodyStmts (bodyLbl uq)
                         $ rebindIndexAndLengthVars uq arr_uq
+                        -- $ addDefaultControlFlow uq
+                        $ addDefaultSynonymLabels uq arr_uq
                         $ arr_loop
           in  (loop, uq)
 
@@ -182,7 +187,12 @@ fuse env = fuse'
               (brr_loop, brr_uq) = fuse' brr uq
               aVar      = eltVar arr_uq
               bVar      = eltVar brr_uq
-              abrr_loop = arr_loop `Loop.append` brr_loop
+
+              -- First separately unite uq/arr_uq and uq/brr_uq
+              -- so they know how to merge into one loop.
+              arr_loop' = addDefaultSynonymLabels uq arr_uq arr_loop
+              brr_loop' = addDefaultSynonymLabels uq brr_uq brr_loop
+              abrr_loop = arr_loop' `Loop.append` brr_loop'
 
               -- BODY
               cVar      = eltVar uq
@@ -196,6 +206,7 @@ fuse env = fuse'
                         $ addArg fVar (toDyn f)
                         $ addStmts bodyStmts (bodyLbl uq)
                         $ rebindIndexAndLengthVars uq arr_uq -- be careful: arbitrary choice between a and b
+                        -- $ addDefaultControlFlow uq
                         $ abrr_loop
           in  (loop, uq)
 
@@ -237,6 +248,8 @@ fuse env = fuse'
                         $ addStmts writeStmts (writeLbl uq)
                         -- Note that we aren't rebinding index since read/write indexes are not the same with Filter
                         $ rebindLengthVar uq arr_uq
+                        -- $ addDefaultControlFlow uq
+                        $ addDefaultSynonymLabels uq arr_uq
                         $ arr_loop
           in  (loop, uq)
 
@@ -266,6 +279,8 @@ fuse env = fuse'
                         $ addStmts bodyStmts (bodyLbl uq)
                         $ addStmts botStmts  (bottomLbl uq)
                         $ rebindIndexAndLengthVars uq arr_uq
+                        -- $ addDefaultControlFlow uq
+                        $ addDefaultSynonymLabels uq arr_uq
                         $ arr_loop
           in  (loop, uq)
 

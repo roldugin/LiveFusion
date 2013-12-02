@@ -212,6 +212,14 @@ theSynonymLabel lbls l = theOneLabel $ synonyms
     err = error "theSynonymLabel: label not found in sets"
 
 
+addSynonymLabel :: Label -> Label -> Loop -> Loop
+addSynonymLabel nu old loop
+  = loop { loopBlockMap = FMap.addSynonym nu old (loopBlockMap loop) }
+
+
+loopBlocks :: Loop -> [Block]
+loopBlocks = FMap.elems . loopBlockMap
+
 
 updateBlock :: Label -> (Block -> Block) -> Loop -> Loop
 updateBlock lbl f loop = putBlock lbl block' loop
@@ -222,7 +230,7 @@ updateBlock lbl f loop = putBlock lbl block' loop
 
 -- | Retreives an existing block out of the loop or returns and empty block
 getBlock :: Label -> Loop -> Block
-getBlock lbl loop = maybe emptyBlock id maybeBlock
+getBlock lbl loop = fromMaybe emptyBlock maybeBlock
   where
     maybeBlock = FMap.lookup lbl (loopBlockMap loop)
 
@@ -240,6 +248,10 @@ addStmt stmt lbl = updateBlock lbl (addStmtsToBlock [stmt])
 
 addStmts :: [Stmt] -> Label -> Loop -> Loop
 addStmts stmts lbl = updateBlock lbl (addStmtsToBlock stmts)
+
+
+setLoopEntry :: Label -> Loop -> Loop
+setLoopEntry lbl loop = loop { loopEntry = Just lbl }
 
 
 unsafeLoopEntry :: Loop -> Label
@@ -307,6 +319,10 @@ pprStmt (Case p l1 l2) = "if " ++ pprVar p ++
                          " then " ++ pprLabel l1 ++
                          " else " ++ pprLabel l2
 pprStmt (Goto l)       = "goto " ++ pprLabel l
+pprStmt (NewArray arr n)        = pprVar arr ++ " = newArray " ++ pprVar n
+pprStmt (WriteArray arr i x)    = pprVar arr ++ "[" ++ pprVar i ++ "] := " ++ pprVar x
+pprStmt (SliceArray arr' arr n) = pprVar arr' ++ " = sliceArray " ++ pprVar arr ++ " " ++ pprVar n
+pprStmt (Return v)     = "return " ++ pprVar v
 pprStmt _              = "Unknown Stmt"
 
 pprLabel :: Label -> String
@@ -315,10 +331,10 @@ pprLabel = show
 
 instance Show Loop where
   show (Loop loopEntry loopArgs loopArrResult loopScalarResult loopBlockMap)
-    = "Loop Entry:    "  ++  maybe "None" pprLabel loopEntry    ++\
-      "Loop Args:     "  ++  (show $ Map.keys loopArgs)         ++\
-      "Array Result:  "  ++  maybe "None" show loopArrResult    ++\
-      "Scalar Result: "  ++  maybe "None" show loopScalarResult ++\
+    = "Loop Entry:    "  ++  maybe "None" pprLabel loopEntry                   ++\
+      "Loop Args:     "  ++  (show $ Map.keys loopArgs)                        ++\
+      "Array Result:  "  ++  maybe "None" (pprVar . arrayVar) loopArrResult    ++\
+      "Scalar Result: "  ++  maybe "None" pprVar              loopScalarResult ++\
       "BlockMap:      "  ++\ pprBlockMap loopBlockMap
 
 
@@ -347,6 +363,45 @@ bodyLbl   = Label "body"
 writeLbl  = Label "write"
 bottomLbl = Label "bottom"
 doneLbl   = Label "done"
+
+-- | Add synonym labels for the basic predefined labels (init, guard, etc..)
+addDefaultSynonymLabels :: Id -> Id -> Loop -> Loop
+addDefaultSynonymLabels nu old loop
+  = foldl alias loop [initLbl, guardLbl, bodyLbl, writeLbl, bottomLbl, doneLbl]
+  where
+    alias loop lblMaker = addSynonymLabel (lblMaker nu) (lblMaker old) loop
+
+-- | Add control flow between some of the known blocks
+addDefaultControlFlow :: Id -> Loop -> Loop
+addDefaultControlFlow uq loop
+  = foldl addFinalGoto loop
+  $ [ (initLbl   , guardLbl)  -- Init   -> Guard
+    , (guardLbl  , bodyLbl)   -- Guard  -> Body
+    , (bodyLbl   , writeLbl)  -- Body   -> Write
+    , (writeLbl  , bottomLbl) -- Body   -> Write
+    , (bottomLbl , guardLbl)  -- Bottom -> Guard
+    ]
+  where
+    addFinalGoto loop (from,to)
+      = let fromLbl = from uq
+            toLbl = to uq
+        in  updateBlock fromLbl
+                        (setBlockFinal $ gotoStmt toLbl)
+                        loop
+
+
+-- | Make sure all default blocks exist before we start adding synonyms.
+--
+--   This would usually happen in fresh loop. But for now we do it in pure
+--   generators and nested combinators.
+--
+--   TODO: should probably not be neccessary
+touchDefaultBlocks :: Id -> Loop -> Loop
+touchDefaultBlocks uq loop
+  = foldl touch loop [initLbl, guardLbl, bodyLbl, writeLbl, bodyLbl, doneLbl]
+  where
+    touch loop mkLbl = updateBlock (mkLbl uq) id {-do nothing-} loop
+
 
 --------------------------------------------------------------------------------
 
@@ -489,8 +544,8 @@ extendedEnv loop = purgeBlockLocalVars
                             (unsafeLoopEntry loop)
   where
     allLoopArgVars     = Map.keys $ loopArgs loop
-    allLoopDecls       = undefined --concatMap (envDeclarations . blockEnv) (loopBlocks loop)
-    allLoopAssumptions = undefined --concatMap (envAssumptions  . blockEnv) (loopBlocks loop)
+    allLoopDecls       = concatMap (envDeclarations . blockEnv) (loopBlocks loop)
+    allLoopAssumptions = concatMap (envAssumptions  . blockEnv) (loopBlocks loop)
     allBlockLocalVars  = (allLoopDecls `union` allLoopArgVars)
                        \\ allLoopAssumptions
 
@@ -604,7 +659,7 @@ reorderDecls loop = loop { loopBlockMap = FMap.map perblock (loopBlockMap loop) 
 instance Monoid Loop where
   mempty = Loop Nothing Map.empty Nothing Nothing FMap.empty
   mappend loop1 loop2
-    = Loop { loopEntry        = Nothing
+    = Loop { loopEntry        = loopEntry    `joinWith` (<|>)
            , loopArgs         = loopArgs     `joinWith` Map.union
            , loopArrResult    = Nothing
            , loopScalarResult = Nothing
