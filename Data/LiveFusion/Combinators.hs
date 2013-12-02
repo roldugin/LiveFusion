@@ -56,6 +56,7 @@ data AST e where
   Zip     :: (Elt a, Elt b) => ArrayAST a -> ArrayAST b -> ArrayAST (a,b)
   Fold    :: Elt a => (a -> a -> a) -> a -> ArrayAST a -> AST a
   Scan    :: Elt a => (a -> a -> a) -> a -> ArrayAST a -> ArrayAST a
+  Fold_s  :: Elt a => (a -> a -> a) -> a -> ArrayAST Int -> ArrayAST a -> ArrayAST a
   ArrLit  :: Elt a => V.Vector a -> ArrayAST a
 
 -- Required for getting data-reify to work with GADTs
@@ -74,6 +75,7 @@ data AST2 e s where
   Fold2    :: Elt a => (a -> a -> a) -> a -> ArrayAST2 a s -> AST2 a s
   Scan2    :: Elt a => (a -> a -> a) -> a -> ArrayAST2 a s -> ArrayAST2 a s
   ArrLit2  :: Elt a => V.Vector a -> ArrayAST2 a s
+  Fold_s2  :: Elt a => (a -> a -> a) -> a -> ArrayAST2 Int s -> ArrayAST2 a s -> ArrayAST2 a s
   Var2     :: Typeable e => s -> AST2 e s
 
 
@@ -94,6 +96,7 @@ instance Typeable e => MuRef (AST e) where
       mapDeRef' ap (Zip arr brr)  = Zip2 <$> (Var2 <$> ap arr) <*> (Var2 <$> ap brr)
       mapDeRef' ap (Fold f z arr) = Fold2 f z <$> (Var2 <$> ap arr)
       mapDeRef' ap (Scan f z arr) = Scan2 f z <$> (Var2 <$> ap arr)
+      mapDeRef' ap (Fold_s f z lens arr) = Fold_s2 f z <$> (Var2 <$> ap lens) <*> (Var2 <$> ap arr)
       mapDeRef' ap (ArrLit vec)   = pure $ ArrLit2 vec
 
 -- This is confusing as the moment: Var refers Unique that identifies the tree node we want to fetch
@@ -142,16 +145,16 @@ fuse env = fuse'
               -- GUARD
               predVar   = var "pred" uq -- boolean guard predicate
               predBind  = bindStmt predVar (App2 ltFn ixVar lenVar)
-              ixGuard   = guardStmt predVar doneLbl
+              ixGuard   = guardStmt predVar (doneLbl uq)
               grdStmts  = [predBind, ixGuard]
 
               -- LOOP
               loop      = setArrResultOnly uq
                         $ addArg arrVar (toDyn vec)
-                        $ addStmts initStmts  initLbl
-                        $ addStmts grdStmts   guardLbl
-                        $ addStmts bodyStmts  bodyLbl
-                        $ addStmts botStmts   bottomLbl
+                        $ addStmts initStmts  (initLbl uq)
+                        $ addStmts grdStmts   (guardLbl uq)
+                        $ addStmts bodyStmts  (bodyLbl uq)
+                        $ addStmts botStmts   (bottomLbl uq)
                         $ Loop.empty
           in  (loop, uq) -- TODO return a result that maps an element of array
 
@@ -169,7 +172,7 @@ fuse env = fuse'
               -- LOOP
               loop      = setArrResultOnly uq
                         $ addArg fVar (toDyn f)
-                        $ addStmts bodyStmts bodyLbl
+                        $ addStmts bodyStmts (bodyLbl uq)
                         $ rebindIndexAndLengthVars uq arr_uq
                         $ arr_loop
           in  (loop, uq)
@@ -191,7 +194,7 @@ fuse env = fuse'
               -- LOOP
               loop      = setArrResultOnly uq
                         $ addArg fVar (toDyn f)
-                        $ addStmts bodyStmts bodyLbl
+                        $ addStmts bodyStmts (bodyLbl uq)
                         $ rebindIndexAndLengthVars uq arr_uq -- be careful: arbitrary choice between a and b
                         $ abrr_loop
           in  (loop, uq)
@@ -210,7 +213,7 @@ fuse env = fuse'
               pApp      = App1 pVar aVar
               boolVar   = var "bool" uq
               boolBind  = bindStmt boolVar pApp
-              guard     = guardStmt boolVar bottomLbl
+              guard     = guardStmt boolVar (bottomLbl uq)
               resVar    = eltVar uq
               resBind   = bindStmt resVar (VarE aVar)
               -- NOTE: This will bug out if there are more guards
@@ -224,14 +227,14 @@ fuse env = fuse'
               oneVar    = var "one" uq
               oneBind   = bindStmt oneVar (IntLit 1)  -- index step
               ixUpdate  = assignStmt ixVar (App2 plusFn ixVar oneVar)
-              writeStmts  = [oneBind, ixUpdate]
+              writeStmts = [oneBind, ixUpdate]
 
               -- LOOP
               loop      = setArrResultOnly uq
                         $ addArg pVar (toDyn p)
-                        $ addStmts initStmts initLbl
-                        $ addStmts bodyStmts bodyLbl
-                        $ addStmts writeStmts writeLbl
+                        $ addStmts initStmts (initLbl uq)
+                        $ addStmts bodyStmts (bodyLbl uq)
+                        $ addStmts writeStmts (writeLbl uq)
                         -- Note that we aren't rebinding index since read/write indexes are not the same with Filter
                         $ rebindLengthVar uq arr_uq
                         $ arr_loop
@@ -259,23 +262,28 @@ fuse env = fuse'
                         $ setScalarResult accVar
                         $ addArg fVar (toDyn f)
                         $ addArg zVar (toDyn z)
-                        $ addStmts initStmts initLbl
-                        $ addStmts bodyStmts bodyLbl
-                        $ addStmts botStmts  bottomLbl
+                        $ addStmts initStmts (initLbl uq)
+                        $ addStmts bodyStmts (bodyLbl uq)
+                        $ addStmts botStmts  (bottomLbl uq)
                         $ rebindIndexAndLengthVars uq arr_uq
                         $ arr_loop
           in  (loop, uq)
 
+    fuse' (Fold_s2 f z lens arr) uq
+        = let (arr_loop, arr_uq)   = fuse' arr uq
+              (lens_loop, lens_uq) = fuse' lens uq
+          in undefined              
+     
 
 -- | Sets the upper bound of an array to be the same as that
 --   of another array.
 rebindLengthVar :: Unique -> Unique -> Loop -> Loop
-rebindLengthVar nu old = addStmt stmt initLbl
+rebindLengthVar nu old = addStmt stmt (initLbl nu)
   where stmt = bindStmt (lengthVar nu) (VarE $ lengthVar old)
 
 
 rebindIndexVar :: Unique -> Unique -> Loop -> Loop
-rebindIndexVar nu old = addStmt stmt initLbl
+rebindIndexVar nu old = addStmt stmt (initLbl nu)
   where stmt = bindStmt (indexVar nu) (VarE $ indexVar old)
 
 
@@ -285,7 +293,7 @@ rebindIndexAndLengthVars nu old = rebindLengthVar nu old
 
 
 {-
-pluginCode :: Typeable e => AST e -> String -> String -> IO (String, [Arg])
+puginCode :: Typeable e => AST e -> String -> String -> IO (String, [Arg])
 pluginCode ast moduleName entryFnName = do
   (env, rootUq, Just rootNode) <- recoverSharing ast
   let (loop, resultVar) = fuse env rootNode rootUq
@@ -297,7 +305,6 @@ pluginCode ast moduleName entryFnName = do
 justCode :: Typeable e => AST e -> IO ()
 justCode ast = putStrLn =<< indexed <$> fst <$> pluginCode ast "Plugin" "pluginEntry"
 -}
-
 fuseToLoop :: Typeable e => AST e -> IO Loop
 fuseToLoop ast = do
   (env, rootUq, Just rootNode) <- recoverSharing ast
@@ -309,9 +316,6 @@ resultType :: t a -> a
 resultType _ = undefined
 
 
-pprAsTy :: Typeable a => String -> a -> String
-pprAsTy var a = paren $ var ++ " :: " ++ (show $ typeOf a)
-
 instance Show (AST e) where
   show (Map _ arr) = "MapAST (" P.++ (show arr) P.++ ")"
   show (Filter _ arr) = "FilterAST (" P.++ (show arr) P.++ ")"
@@ -320,24 +324,23 @@ instance Show (AST e) where
   show (Fold _ _ arr) = "FoldAST (" P.++ (show arr) P.++ ")"
   show (ArrLit vec) = show vec
 
-map :: (Elt a, Elt b) => (a -> b) -> ArrayAST a -> ArrayAST b
-map f = Map f
+--map :: (Elt a, Elt b) => (a -> b) -> ArrayAST a -> ArrayAST b
+--map f = Map f
 
-filter :: (Elt a) => (a -> Bool) -> ArrayAST a -> ArrayAST a
-filter p = Filter p
+--filter :: (Elt a) => (a -> Bool) -> ArrayAST a -> ArrayAST a
+--filter p = Filter p
 
-zipWith :: (Elt a, Elt b, Elt c) => (a -> b -> c) -> ArrayAST a -> ArrayAST b -> AST (V.Vector c)
-zipWith f arr brr = ZipWith f arr brr
+--zipWith :: (Elt a, Elt b, Elt c) => (a -> b -> c) -> ArrayAST a -> ArrayAST b -> AST (V.Vector c)
+--zipWith f arr brr = ZipWith f arr brr
 
-zip :: (Elt a, Elt b) => ArrayAST a -> ArrayAST b -> AST (V.Vector (a,b))
-zip arr brr = Zip arr brr
+--zip :: (Elt a, Elt b) => ArrayAST a -> ArrayAST b -> AST (V.Vector (a,b))
+--zip arr brr = Zip arr brr
 
 --fold :: Elt a => (a -> a -> a) -> a -> ArrayAST a -> a
 --fold f z arr = evalAST $ Fold f z arr
 
 --toList :: Elt a => ArrayAST a -> [a]
 --toList = V.toList . eval
-
 fromList :: Elt a => [a] -> ArrayAST a
 fromList = ArrLit . V.fromList
 

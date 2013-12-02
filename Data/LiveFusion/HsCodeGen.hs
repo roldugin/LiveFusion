@@ -6,6 +6,7 @@ module Data.LiveFusion.HsCodeGen where
 
 import Data.LiveFusion.Util
 import Data.LiveFusion.Loop as Lp
+import qualified Data.LiveFusion.FuzzyMap as FMap
 
 import Language.Haskell.TH as TH
 
@@ -14,7 +15,7 @@ import qualified Data.Map as Map
 import Data.List
 import Data.Functor.Identity
 import System.IO.Unsafe ( unsafePerformIO )
-
+import Control.Arrow ( first )
 
 -- Modules required for code generation
 import qualified Data.Vector.Unboxed as V
@@ -27,21 +28,21 @@ import Data.Dynamic
 --
 --   TODO: Perhaps passing the whole environment is not the best approach.
 --   TODO: KNOWN ISSUE Updated variable cannot be used in the same block.
-cgBlock :: VarMap -> Block -> Dec
-cgBlock emap blk@(Block lbl stmts) = blockFun
+cgBlock :: VarMap -> Label -> Block -> Dec
+cgBlock emap lbl blk@(Block stmts final) = blockFun
   where
-    blockFun = FunD (mkName lbl) [Clause pats fnBody []]
-    pats = map (BangP . VarP . thName) blockArgs
-    fnBody = NormalB $ DoE (toTHStmts stmts)
+    blockFun = FunD (cgLabelName lbl) [Clause pats fnBody []]
+    pats = map (BangP . VarP . cgVarName) blockArgs
+    fnBody = NormalB $ DoE (cgStmts stmts)
 
-    toTHStmts (stmt:rest)
+    cgStmts (stmt:rest)
       = case stmt of
           (Guard p lbl) -> return {- a sinleton list -}
-                        $ grdToTHStmt emap dirtyVars   -- environment stuff
+                        $ cgGuardStmt emap dirtyVars   -- environment stuff
                                       p    lbl         -- guard parameters
-                                      (toTHStmts rest) -- statements following the guard
-          _             -> (toTHStmt emap dirtyVars stmt) : (toTHStmts rest)
-    toTHStmts [] = []
+                                      (cgStmts rest) -- statements following the guard
+          _             -> (cgStmt emap dirtyVars stmt) : (cgStmts rest)
+    cgStmts [] = []
 
     blockArgs = emap ! lbl
 
@@ -49,89 +50,90 @@ cgBlock emap blk@(Block lbl stmts) = blockFun
     dirtyVars = envDirty (blockEnv blk)
 
 
+cgLabelName :: Label -> TH.Name
+cgLabelName = mkName . pprLabel
+
 -- | Guard is a little tricky because we have queue up the statement after
 --   the the block into one of the branches.
 --
 --   TODO: If creating new blocks was easier in our framework, we could potentially
 --   generate a whole new block for the rest of the statements and generalise the Guard
 --   to a Case expression.
-grdToTHStmt :: VarMap -> [Var] -> Var -> Label -> [TH.Stmt] -> TH.Stmt
-grdToTHStmt emap dirtyVars pred onFailLbl followingStmts
-  = let thPredExp = toTHExp (Lp.VarE pred)
-        thGotoExp = goto emap dirtyVars onFailLbl
+cgGuardStmt :: VarMap -> [Var] -> Var -> Label -> [TH.Stmt] -> TH.Stmt
+cgGuardStmt emap dirtyVars pred onFailLbl followingStmts
+  = let thPredExp = cgExp (Lp.VarE pred)
+        thcgGotoExpExp = cgGotoExp emap dirtyVars onFailLbl
         thOKExp   = DoE followingStmts
-        thStmt    = NoBindS $ TH.CondE thPredExp thOKExp thGotoExp
+        thStmt    = NoBindS $ TH.CondE thPredExp thOKExp thcgGotoExpExp
     in  thStmt
 
 
 -- | Generates a TH statement from a statement in our Loop representation.
-toTHStmt :: VarMap -> [Var] -> Lp.Stmt -> TH.Stmt
-toTHStmt _ _ (Bind v e)
-  = let thExp = toTHExp e
-        thVar  = BangP $ VarP $ thName v
+cgStmt :: VarMap -> [Var] -> Lp.Stmt -> TH.Stmt
+cgStmt _ _ (Bind v e)
+  = let thExp  = cgExp e
+        thVar  = BangP $ VarP $ cgVarName v
         thStmt = LetS [ValD thVar (NormalB thExp) [{-no where clause-}]]
     in  thStmt
 
-toTHStmt _ _ (Assign v e)
-  = let thExp = toTHExp e
-        thVar  = BangP $ VarP $ thDirtyName v
+cgStmt _ _ (Assign v e)
+  = let thExp  = cgExp e
+        thVar  = BangP $ VarP $ cgDirtyVarName v
         thStmt = LetS [ValD thVar (NormalB thExp) [{-no where clause-}]]
     in  thStmt
 
-toTHStmt emap dirtyVars (Case pred tLbl fLbl)
-  = let thPredExp = toTHExp (Lp.VarE pred)
-        thTExp = goto emap dirtyVars tLbl
-        thFExp = goto emap dirtyVars fLbl
+cgStmt emap dirtyVars (Case pred tLbl fLbl)
+  = let thPredExp = cgExp (Lp.VarE pred)
+        thTExp = cgGotoExp emap dirtyVars tLbl
+        thFExp = cgGotoExp emap dirtyVars fLbl
         thStmt = NoBindS $ CondE thPredExp thTExp thFExp
     in  thStmt
 
-toTHStmt emap dirtyVars (Goto lbl)
-  = NoBindS $ goto emap dirtyVars lbl
+cgStmt emap dirtyVars (Goto lbl)
+  = NoBindS $ cgGotoExp emap dirtyVars lbl
 
-toTHStmt _ _ (NewArray arr n)
-  = let thStmt = BindS (BangP $ VarP $ thName arr)
+cgStmt _ _ (NewArray arr n)
+  = let thStmt = BindS (BangP $ VarP $ cgVarName arr)
                        (TH.AppE newArrayFn len)
         newArrayFn = TH.VarE $ mkName "newArray"
-        len = toTHVarE n
+        len = cgVar n
     in  thStmt
 
-toTHStmt _ _ (WriteArray arr i x)
+cgStmt _ _ (WriteArray arr i x)
   = let thStmt = NoBindS $ TH.AppE (TH.AppE (TH.AppE writeArrayFn arr_th) i_th) x_th
         writeArrayFn = TH.VarE $ mkName "writeArray"
-        arr_th = toTHVarE arr
-        i_th   = toTHVarE i
-        x_th   = toTHVarE x
+        arr_th = cgVar arr
+        i_th   = cgVar i
+        x_th   = cgVar x
     in  thStmt
 
-toTHStmt _ _ (SliceArray arr' arr n)
-  = let thStmt = BindS (BangP $ VarP $ thName arr')
+cgStmt _ _ (SliceArray arr' arr n)
+  = let thStmt = BindS (BangP $ VarP $ cgVarName arr')
                        (TH.AppE (TH.AppE sliceArrayFn arr_th) n_th)
         sliceArrayFn = TH.VarE $ mkName "sliceArray"
-        arr_th = toTHVarE arr
-        n_th   = toTHVarE n
+        arr_th = cgVar arr
+        n_th   = cgVar n
     in  thStmt
 
-toTHStmt _ _ (Return v)
+cgStmt _ _ (Return v)
   = let thStmt   = NoBindS $ TH.AppE returnFn v_th
         returnFn = TH.VarE $ mkName "return"
-        v_th     = toTHVarE v
+        v_th     = cgVar v
     in  thStmt
 
 
 
-goto :: VarMap -> [Var] -> Label -> TH.Exp
-goto emap dirtyVars lbl = applyMany thFName thArgs
+cgGotoExp :: VarMap -> [Var] -> Label -> TH.Exp
+cgGotoExp emap dirtyVars lbl = applyMany thFName thArgs
   where
     args    = emap ! lbl
 
-    thFName = TH.VarE $ mkName lbl
+    thFName = TH.VarE $ cgLabelName lbl
 
-    thArgs  = map TH.VarE
-            $ map toTHName
-            $ args
+    thArgs  = map (TH.VarE . cgArg) args
 
-    toTHName v | v `elem` dirtyVars = thDirtyName v
-               | otherwise          = thName v
+    cgArg v | v `elem` dirtyVars = cgDirtyVarName v
+            | otherwise          = cgVarName v
 
 
 -- | Takes a list of expressions and applies them one after the other
@@ -142,45 +144,45 @@ applyMany1 exps = foldl1 TH.AppE exps
 applyMany :: TH.Exp -> [TH.Exp] -> TH.Exp
 applyMany fun exps = applyMany1 (fun : exps)
 
--- | Turn a Loop toTHExpession to a TH toTHExpession.
+-- | Turn a Loop cgExpession to a TH cgExpession.
 --
-toTHExp :: Lp.Expr -> TH.Exp
-toTHExp (Lp.VarE v)
-  = toTHVarE v
+cgExp :: Lp.Expr -> TH.Exp
+cgExp (Lp.VarE v)
+  = cgVar v
 
-toTHExp (Lp.App1 f v)
-  = let th_f = toTHVarE f
-        th_v = toTHVarE v
+cgExp (Lp.App1 f v)
+  = let th_f = cgVar f
+        th_v = cgVar v
     in  TH.AppE th_f th_v
 
-toTHExp (Lp.App2 f v1 v2)
-  = let th_f  = toTHVarE f
-        th_v1 = toTHVarE v1
-        th_v2 = toTHVarE v2
+cgExp (Lp.App2 f v1 v2)
+  = let th_f  = cgVar f
+        th_v1 = cgVar v1
+        th_v2 = cgVar v2
     in  TH.AppE (TH.AppE th_f th_v1) th_v2
 
-toTHExp (Lp.App3 f v1 v2 v3)
-  = let th_f  = toTHVarE f
-        th_v1 = toTHVarE v1
-        th_v2 = toTHVarE v2
-        th_v3 = toTHVarE v3
+cgExp (Lp.App3 f v1 v2 v3)
+  = let th_f  = cgVar f
+        th_v1 = cgVar v1
+        th_v2 = cgVar v2
+        th_v3 = cgVar v3
     in  TH.AppE (TH.AppE (TH.AppE th_f th_v1) th_v2) th_v3
 
-toTHExp (Lp.IntLit i)
+cgExp (Lp.IntLit i)
   = TH.LitE $ TH.IntegerL $ toInteger i
 
 
 -- | Perhaps one day we will support Exprs in more places.
 --   For now much of our loop language are just Vars.
-toTHVarE :: Lp.Var -> TH.Exp
-toTHVarE = TH.VarE . thName
+cgVar :: Lp.Var -> TH.Exp
+cgVar = TH.VarE . cgVarName
 
-thName :: Lp.Var -> TH.Name
-thName = TH.mkName . Lp.pprVar
+cgVarName :: Lp.Var -> TH.Name
+cgVarName = TH.mkName . Lp.pprVar
 
 
-thDirtyName :: Lp.Var -> TH.Name
-thDirtyName = TH.mkName . (++ "'") . Lp.pprVar
+cgDirtyVarName :: Lp.Var -> TH.Name
+cgDirtyVarName = TH.mkName . (++ "'") . Lp.pprVar
 
 
 defaultPluginCode :: Loop -> String
@@ -214,12 +216,12 @@ pluginEntryCode entryFnName loop
 
     -- [!f1, !f2, !arr1, ...]
     argList   = ListP
-              $ map (BangP . VarP . thName) argVars
+              $ map (BangP . VarP . cgVarName) argVars
 
     -- (fd f1) (fd f2) (fd arr1) ...
     loopCall  = toDynamic
               $ applyMany loopEntry
-              $ map (coerceArg . TH.VarE . thName) argVars
+              $ map (coerceArg . TH.VarE . cgVarName) argVars
 
     -- Applies the arg to fd function (fromDynamic, expected to be in scope)
     coerceArg = AppE (TH.VarE $ mkName "fd")
@@ -227,7 +229,7 @@ pluginEntryCode entryFnName loop
     toDynamic = AppE (TH.VarE $ mkName "toDyn")
 
     -- E.g. init_
-    loopEntry = TH.VarE $ mkName initLbl
+    loopEntry = TH.VarE $ cgLabelName $ unsafeLoopEntry loop
 
     argVars   = Map.keys $ loopArgs loop
 
@@ -237,9 +239,11 @@ loopCode :: Loop -> String
 loopCode loop = pprint
               $ map codeGenBlock allBlocks
   where
-    codeGenBlock = cgBlock extEnv
-    allBlocks    = Map.elems $ loopBlockMap loop
-    extEnv       = extendedEnv loop -- Environment after variable and goto analyses
+    codeGenBlock (lbl,blk) = cgBlock extEnv lbl blk
+
+    allBlocks = map (first theOneLabel) (FMap.assocs $ loopBlockMap loop)
+
+    extEnv    = extendedEnv loop -- Environment after variable and goto analyses
 
 
 --------------------------------------------------------------------------------

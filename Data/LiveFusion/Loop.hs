@@ -1,4 +1,4 @@
-{-# LANGUAGE GADTs #-}
+{-# LANGUAGE GADTs, PatternGuards #-}
 
 -- | Loop is an abstract representation of a loop computation.
 --   It can be used to generate loop code.
@@ -6,12 +6,20 @@
 module Data.LiveFusion.Loop where
 
 import Data.LiveFusion.Util
+import Data.LiveFusion.FuzzyMap ( FuzzyMap )
+import qualified Data.LiveFusion.FuzzyMap as FMap
 
 import Data.Map ( Map )
 import qualified Data.Map as Map
+import Data.Maybe
+
+import Data.Set ( Set )
+import qualified Data.Set as Set
+
 import Data.Dynamic
 import Data.List as List
 import Data.Monoid
+import Control.Applicative ( (<|>), (<$>) )
 import Control.Monad
 import Control.Category ( (>>>) )
 
@@ -19,6 +27,13 @@ import Control.Category ( (>>>) )
 type Id = Int
 
 type Name  = String
+
+type Arg   = Dynamic
+
+
+
+-- Variables
+-- ----------------------------------------------------------------------------
 
 data Var = IdVar Name Id
          | SimplVar Name
@@ -50,14 +65,58 @@ plusFn = SimplVar "(+)"
 lengthFn = SimplVar "lengthArray"
 readFn = SimplVar "readArray"
 
-type Arg   = Dynamic
 
-data Block = Block Label [Stmt]
+
+-- Blocks
+-------------------------------------------------------------------------------
+
+data Block = Block [Stmt] (Maybe Stmt)
+
+
+emptyBlock :: Block
+emptyBlock = Block [] Nothing
+
 
 blockStmts :: Block -> [Stmt]
-blockStmts (Block _ stmts) = stmts
+blockStmts (Block stmts _final) = stmts
 
-type Label = String
+
+blockFinal :: Block -> Maybe Stmt
+blockFinal (Block _stmts final) = final
+
+
+addStmtsToBlock :: [Stmt] -> Block -> Block
+addStmtsToBlock stmts (Block stmts0 final0) = Block (stmts0 ++ stmts) final0
+
+
+setBlockFinal :: Stmt -> Block -> Block
+setBlockFinal final (Block stmts _) = Block stmts (Just final)
+
+
+unsetBlockFinal :: Block -> Block
+unsetBlockFinal (Block stmts _) = Block stmts Nothing
+
+
+rewriteBlockLabels :: [Set Label] -> Block -> Block
+rewriteBlockLabels lbls (Block stmts final) = Block stmts' final'
+  where
+    stmts' = map (rewriteStmtLabels lbls) stmts
+    final' = rewriteStmtLabels lbls <$> final
+
+
+-- Labels
+-------------------------------------------------------------------------------
+
+data Label = Label Name Id
+  deriving ( Eq, Ord )
+
+instance Show Label where
+  show (Label nm i) = nm ++ "_" ++ show i
+
+
+
+-- Statements
+-------------------------------------------------------------------------------
 
 data Stmt = Bind Var Expr
           | Assign Var Expr
@@ -88,8 +147,25 @@ writeArrStmt = WriteArray
 sliceArrStmt = SliceArray
 returnStmt   = Return
 
-data Loop = Loop { -- | Global arguments and their values
-                   loopArgs         :: (Map Var Arg)
+
+rewriteStmtLabels :: [Set Label] -> Stmt -> Stmt
+rewriteStmtLabels lbls = go
+  where
+    rw l = theSynonymLabel lbls l
+
+    go (Case v l1 l2) = Case v (rw l1) (rw l2)
+    go (Guard v l)    = Guard v (rw l)
+    go (Goto l)       = Goto (rw l)
+    go _stmt          = _stmt
+
+-- Loops
+-------------------------------------------------------------------------------
+
+data Loop = Loop { -- | Loop entry block
+                   loopEntry        :: Maybe Label
+
+                   -- | Global arguments and their values
+                 , loopArgs         :: (Map Var Arg)
 
                    -- | Resulting manifest array
                  , loopArrResult    :: Maybe Id  -- May not be the best way to represent this,
@@ -98,42 +174,82 @@ data Loop = Loop { -- | Global arguments and their values
                    -- | Resulting scalar result
                  , loopScalarResult :: Maybe Var
 
-                   -- | List of goto code loopBlockMap
+                   -- | Loops's code block with their accosiated labels
                  , loopBlockMap     :: BlockMap
                  }
 
 
-type BlockMap = Map Label Block
+-- | A collection of statememt blocks identified by labels akin to asm labels.
+--
+--   Each block can be identified by multiple labels. A new synonym label can
+--   be added useing 'FuzzyMap.addSynonym'.
+--
+--   In the following example the block is both labelled 'init_0' and 'init_1'.
+-- @
+--   init_0:
+--   init_1:
+--     let x = 42
+--     let y = 1984
+-- @
+type BlockMap = FuzzyMap Label Block
 
 
-loopBlocks :: Loop -> [Block]
-loopBlocks = Map.elems . loopBlockMap
+-- | Reduces a set of labels to one specific label.
+--
+--   The reduction function can be anything as long as the loop doesn't change
+--   after we start reducing all label synonyms to one concrete label.
+theOneLabel :: Set Label -> Label
+theOneLabel = Set.findMin 
+
+
+-- | Rewrites one label to its synonym from the loop following a predefined
+--   convention.
+theSynonymLabel :: [Set Label] -> Label -> Label
+theSynonymLabel lbls l = theOneLabel $ synonyms
+  where
+    synonyms = fromMaybe err
+             $ find (l `Set.member`) lbls
+    err = error "theSynonymLabel: label not found in sets"
+
 
 
 updateBlock :: Label -> (Block -> Block) -> Loop -> Loop
-updateBlock lbl mut loop = putBlock block' loop
+updateBlock lbl f loop = putBlock lbl block' loop
   where
     block  = getBlock lbl loop
-    block' = mut block
+    block' = f block
 
 
+-- | Retreives an existing block out of the loop or returns and empty block
 getBlock :: Label -> Loop -> Block
 getBlock lbl loop = maybe emptyBlock id maybeBlock
   where
-    blockMap  = loopBlockMap loop
-    maybeBlock = Map.lookup lbl blockMap
-    emptyBlock = Block lbl []
+    maybeBlock = FMap.lookup lbl (loopBlockMap loop)
 
 
-putBlock :: Block -> Loop -> Loop
-putBlock blk@(Block lbl _) loop = loop { loopBlockMap = loopBlockMap' }
+putBlock :: Label -> Block -> Loop -> Loop
+putBlock lbl blk loop = loop { loopBlockMap = loopBlockMap' }
   where
-    loopBlockMap' = Map.insert lbl blk (loopBlockMap loop)
+    loopBlockMap' = FMap.insert lbl blk (loopBlockMap loop)
 
 
+-- Append a statement to the specified code block
+addStmt :: Stmt -> Label -> Loop -> Loop
+addStmt stmt lbl = updateBlock lbl (addStmtsToBlock [stmt])
+
+
+addStmts :: [Stmt] -> Label -> Loop -> Loop
+addStmts stmts lbl = updateBlock lbl (addStmtsToBlock stmts)
+
+
+unsafeLoopEntry :: Loop -> Label
+unsafeLoopEntry = fromMaybe noEntryErr . loopEntry
+  where
+    noEntryErr = error "exendedEnv: loop entry must be specified"
+
+
+-- Scalar and Array results manipulation
 --------------------------------------------------------------------------------
--- | Scalar and Array results manipulation
-
 
 setArrResultImpl :: Maybe Id -> Loop -> Loop
 setArrResultImpl mbId loop = loop { loopArrResult = mbId }
@@ -164,39 +280,23 @@ setArrResultOnly :: Id -> Loop -> Loop
 setArrResultOnly i = unsetScalarResult
                    . setArrResult i
 
+
+
+-- Pretty printing
 --------------------------------------------------------------------------------
-
-
---------------------------------------------------------------------------------
--- | Statements
---------------------------------------------------------------------------------
-
-addStmtsToBlock :: [Stmt] -> Block -> Block
-addStmtsToBlock stmts (Block lbl stmts0) = Block lbl (stmts0 ++ stmts)
-
-
--- Append a statement to the specified code block
-addStmt :: Stmt -> Label -> Loop -> Loop
-addStmt stmt lbl = updateBlock lbl (addStmtsToBlock [stmt])
-
-
-addStmts :: [Stmt] -> Label -> Loop -> Loop
-addStmts stmts lbl = updateBlock lbl (addStmtsToBlock stmts)
-
---------------------------------------------------------------------------------
-
-
---------------------------------------------------------------------------------
--- | Pretty printing
 
 pprBlockMap :: BlockMap -> String
-pprBlockMap = concatMap pprBlock . Map.elems
+pprBlockMap = unlines . map pprOne . FMap.assocs
+  where
+    pprOne (lbls, blk) = (pprLabels lbls) ++\
+                         (indent 1 $ pprBlock blk)
+    pprLabels = unlines . map (\l -> pprLabel l ++ ":") . Set.toList
 
 
 pprBlock :: Block -> String
-pprBlock (Block lbl stmts)
-  = pprLabel lbl ++ ":" ++\
-    (indent 1 $ unlines $ map pprStmt stmts)
+pprBlock (Block stmts mbfinal)
+  = unlines $ map pprStmt (stmts ++ fin)
+  where fin = maybe [] return mbfinal -- returns either singleton or empty list
 
 
 pprStmt :: Stmt -> String
@@ -210,22 +310,23 @@ pprStmt (Goto l)       = "goto " ++ pprLabel l
 pprStmt _              = "Unknown Stmt"
 
 pprLabel :: Label -> String
-pprLabel = id
+pprLabel = show
 
 
 instance Show Loop where
-  show (Loop loopArgs loopArrResult loopScalarResult loopBlockMap)
-    = "Loop Args:   "        ++ (show $ Map.keys loopArgs) ++\
-      "     Array Result: "  ++ maybe "None" show loopArrResult ++\
-      "     Scalar Result: " ++ maybe "None" show loopScalarResult ++\
-      "     BlockMap: "  ++\ pprBlockMap loopBlockMap
+  show (Loop loopEntry loopArgs loopArrResult loopScalarResult loopBlockMap)
+    = "Loop Entry:    "  ++  maybe "None" pprLabel loopEntry    ++\
+      "Loop Args:     "  ++  (show $ Map.keys loopArgs)         ++\
+      "Array Result:  "  ++  maybe "None" show loopArrResult    ++\
+      "Scalar Result: "  ++  maybe "None" show loopScalarResult ++\
+      "BlockMap:      "  ++\ pprBlockMap loopBlockMap
 
 
 pprVarMap :: VarMap -> String
 pprVarMap = ("Transitive Variable Map:" ++\)
           . unlines . map pprVarMapEntry . Map.assocs
   where
-    pprVarMapEntry (lbl,vars) = lbl ++ ": " ++ show vars
+    pprVarMapEntry (lbl,vars) = pprLabel lbl ++ ": " ++ show vars
 
 
 
@@ -236,34 +337,22 @@ addArg var arg loop = loop { loopArgs = loopArgs' }
   where loopArgs' = Map.insert var arg (loopArgs loop)
 
 
-
+-- Several predefined labels
 --------------------------------------------------------------------------------
--- | Several predefined labels
 
-initLbl :: Label
-initLbl = "init_"
-
-guardLbl :: Label
-guardLbl = "guard_"
-
-writeLbl :: Label
-writeLbl = "write_"
-
-bodyLbl :: Label
-bodyLbl = "body_"
-
-bottomLbl :: Label
-bottomLbl = "bottom_"
-
-doneLbl :: Label
-doneLbl = "done_"
+initLbl, guardLbl, bodyLbl, writeLbl, bottomLbl, doneLbl :: Id -> Label
+initLbl   = Label "init"
+guardLbl  = Label "guard"
+bodyLbl   = Label "body"
+writeLbl  = Label "write"
+bottomLbl = Label "bottom"
+doneLbl   = Label "done"
 
 --------------------------------------------------------------------------------
 
 
+-- Environment
 --------------------------------------------------------------------------------
--- | Environment
-
 
 -- | Per block environment which tracks the variables that the block
 --   relies upon being present, the variables declared in this block as well as
@@ -384,7 +473,7 @@ blockEnv blk = foldl (flip analyse) emptyEnv (blockStmts blk)
     analyse (Return v)     = assume v
 
 
--- | Transitive environment envAssumptions
+-- | Transitive environment assumptions
 type VarMap = Map Label [Var]
 
 
@@ -397,11 +486,11 @@ extendedEnv :: Loop -> VarMap
 extendedEnv loop = purgeBlockLocalVars
                  $ traceEnv allLoopArgVars -- all declarations so far
                             Map.empty
-                            initLbl        -- init is assumed to be the entry block
+                            (unsafeLoopEntry loop)
   where
     allLoopArgVars     = Map.keys $ loopArgs loop
-    allLoopDecls       = concatMap (envDeclarations . blockEnv) (loopBlocks loop)
-    allLoopAssumptions = concatMap (envAssumptions  . blockEnv) (loopBlocks loop)
+    allLoopDecls       = undefined --concatMap (envDeclarations . blockEnv) (loopBlocks loop)
+    allLoopAssumptions = undefined --concatMap (envAssumptions  . blockEnv) (loopBlocks loop)
     allBlockLocalVars  = (allLoopDecls `union` allLoopArgVars)
                        \\ allLoopAssumptions
 
@@ -441,14 +530,14 @@ extendedEnv loop = purgeBlockLocalVars
 --------------------------------------------------------------------------------
 
 
--- | Inserts known Gotos between several of the predefined blocks
+-- | Reduces the minimal set of labels
 postprocessLoop :: Loop -> Loop
-postprocessLoop
-  = insertControlFlow
-  . reorderDecls
-  . insertResultArray
+postprocessLoop = rewriteLoopLabels
+                . reorderDecls
+                . insertResultArray
 
 
+{-
 insertControlFlow :: Loop -> Loop
 insertControlFlow
   = addStmt (gotoStmt guardLbl)  initLbl    -- Init -> Guard
@@ -456,32 +545,42 @@ insertControlFlow
   . addStmt (gotoStmt writeLbl) bodyLbl     -- Body -> Write
   . addStmt (gotoStmt bottomLbl) writeLbl    -- Body -> Write
   . addStmt (gotoStmt guardLbl)  bottomLbl  -- Bottom -> Guard
+-}
+
+rewriteLoopLabels :: Loop -> Loop
+rewriteLoopLabels loop
+  = loop { loopBlockMap = newBlockMap
+         , loopEntry    = newEntry }
+  where
+    lbls = FMap.keys $ loopBlockMap loop
+    newEntry = theSynonymLabel lbls <$> loopEntry loop
+    newBlockMap = FMap.map (rewriteBlockLabels lbls) (loopBlockMap loop)
 
 
 insertResultArray :: Loop -> Loop
 insertResultArray loop
   | Just uq <- loopArrResult loop
-  = let alloc      = newArrStmt arr bound
-        write      = writeArrStmt arr ix elt
-        slice      = sliceArrStmt resultVar arr ix
-        ret        = returnStmt resultVar
+  = let alloc = newArrStmt arr bound
+        write = writeArrStmt arr ix elt
+        slice = sliceArrStmt resultVar arr ix
+        ret   = returnStmt resultVar
 
-        arr        = arrayVar  uq
-        bound      = lengthVar uq
-        ix         = indexVar  uq
-        elt        = eltVar    uq
+        arr   = arrayVar  uq
+        bound = lengthVar uq
+        ix    = indexVar  uq
+        elt   = eltVar    uq
 
-        process = addStmt alloc initLbl
-              >>> addStmt write writeLbl
-              >>> addStmt slice doneLbl
-              >>> addStmt ret   doneLbl
+        process = addStmt alloc (initLbl uq)
+              >>> addStmt write (writeLbl uq)
+              >>> addStmt slice (doneLbl uq)
+              >>> addStmt ret   (doneLbl uq)
 
     in  process loop
 
 
 -- | All declarations must go first in the block.
 --
---   Otherwise, some of them may not even be in scope when they are req'd.
+--   Otherwise, some of them may not even be in scope when they are required.
 --   E.g. when a jump on a guard occurs.
 --
 --   TODO: Explain this better, sketchy explanation follows.
@@ -491,24 +590,25 @@ insertResultArray loop
 --         known to the block. This won't be possible if the declaration comes after
 --         the control transfer.
 reorderDecls :: Loop -> Loop
-reorderDecls loop = loop { loopBlockMap = Map.map perblock (loopBlockMap loop) }
+reorderDecls loop = loop { loopBlockMap = FMap.map perblock (loopBlockMap loop) }
   where
-    perblock (Block lbl stmts) = Block lbl (reorder stmts)
+    perblock (Block stmts final) = Block (reorder stmts) final
 
     reorder = uncurry (++)
             . partition isDecl
 
-    isDecl (Bind _ _) = True
+    isDecl (Bind   _ _) = True
     isDecl (Assign _ _) = True
-    isDecl _ = False
+    isDecl _            = False
 
 instance Monoid Loop where
-  mempty = Loop Map.empty Nothing Nothing Map.empty
+  mempty = Loop Nothing Map.empty Nothing Nothing FMap.empty
   mappend loop1 loop2
-    = Loop { loopArgs         = loopArgs     `joinWith` Map.union
+    = Loop { loopEntry        = Nothing
+           , loopArgs         = loopArgs     `joinWith` Map.union
            , loopArrResult    = Nothing
            , loopScalarResult = Nothing
-           , loopBlockMap     = loopBlockMap `joinWith` Map.unionWith appendLoopBlockMap
+           , loopBlockMap     = loopBlockMap `joinWith` FMap.unionWith appendLoopBlockMap
            }
     where
       joinWith :: (Loop  -> field)          -- field to take from loop
@@ -526,8 +626,8 @@ empty = mempty
 
 
 appendLoopBlockMap :: Block -> Block -> Block
-appendLoopBlockMap (Block lbl stmts1) (Block _ stmts2)
-  = Block lbl (stmts1 ++ stmts2)
+appendLoopBlockMap (Block stmts1 final1) (Block stmts2 final2)
+  = Block (stmts1 ++ stmts2) (final1 <|> final2)
 
 -- | Represents an expression in the loop.
 --

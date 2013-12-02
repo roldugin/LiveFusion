@@ -4,7 +4,7 @@ import Control.Arrow ( first, second )
 import Data.Functor
 import Data.List as L hiding ( lookup )
 import Data.Maybe
-import Data.Set ( Set, (\\) )
+import Data.Set ( Set )
 import qualified Data.Set as Set
 
 import Prelude as P hiding ( lookup )
@@ -59,8 +59,8 @@ addSynonym new old = modifyStor (L.map (first adjustKeys))
 
 
 (!) :: Ord k => FuzzyMap k a -> k -> a
-(!) m k = fromMaybe (error "Error: element not in the FuzzyMap")
-                    (lookup k m)
+(!) m k = fromMaybe err (lookup k m)
+  where err = error "FuzzyMap.!: element not in the map"
 
 
 lookup :: Ord k => k -> FuzzyMap k a -> Maybe a
@@ -79,6 +79,12 @@ lookupAny ks m = snd <$> lookupAny' ks m
 lookupAny' :: Ord k => Set k -> FuzzyMap k a -> Maybe (Set k, a)
 lookupAny' ks m = L.find containKeys (stor m)
   where containKeys = intersects ks . fst
+
+
+-- | /O(n)/. Return all synomyms of a given key.
+synonyms :: Ord k => k -> FuzzyMap k a -> Set k
+synonyms k m = fst $ fromMaybe err (lookup' k m)
+  where err = error "FuzzyMap.synonyms: element not in the map"
 
 
 empty :: FuzzyMap k a
