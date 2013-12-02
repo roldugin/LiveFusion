@@ -12,7 +12,7 @@ import Prelude as P hiding ( lookup )
 
 type FuzzyStor k a = [(Set k, a)]
 
-data FuzzyMap k a = FuzzyMap (FuzzyStor k a)
+type FuzzyMap k a = FuzzyStor k a
 			
 
 -- | Insert a new key and value in the map. If the key is already present in
@@ -82,7 +82,7 @@ lookupAny' ks m = L.find containKeys (stor m)
 
 
 empty :: FuzzyMap k a
-empty = FuzzyMap []
+empty = []
 
 
 elems :: FuzzyMap k a -> [a]
@@ -137,15 +137,20 @@ unionWithKeys f = mergeWithKeys (\ks x y -> Just $ f ks x y) id id
 
 
 mergeWithKeys :: Ord k => (Set k -> a -> b -> Maybe c)
-              -> (FuzzyMap k a -> FuzzyMap k c)
-              -> (FuzzyMap k b -> FuzzyMap k c)
-              -> FuzzyMap k a
-              -> FuzzyMap k b
-              -> FuzzyMap k c
+             -> (FuzzyMap k a -> FuzzyMap k c)
+             -> (FuzzyMap k b -> FuzzyMap k c)
+             -> FuzzyMap k a
+             -> FuzzyMap k b
+             -> FuzzyMap k c
 mergeWithKeys f = mergeWithKeys2 f'
   where
-    f' :: Ord k => Set k -> a -> Set k -> b -> Maybe (Set k, c)
-    f' ks1 v1 ks2 v2 = snd <$> f (ks1 `Set.union` ks2) v1 v2
+    f' ks1 v1 ks2 v2
+      = let ks  = ks1 `Set.union` ks2
+            mbv = f ks v1 v2
+        in  case mbv of
+              Nothing -> Nothing
+              Just v  -> Just (ks,v)
+
 
 
 mergeWithKeys2 :: Ord k => (Set k -> a -> Set k -> b -> Maybe (Set k,c))
@@ -154,37 +159,43 @@ mergeWithKeys2 :: Ord k => (Set k -> a -> Set k -> b -> Maybe (Set k,c))
              -> FuzzyMap k a
              -> FuzzyMap k b
              -> FuzzyMap k c
-mergeWithKeys2 f f1 f2 m1 m2 = FuzzyMap $ go (stor m1) (stor m2)
+mergeWithKeys2 f f1 f2 m1 m2 = go m1 m2
   where
-    go :: Ord k => FuzzyStor k a -> FuzzyStor k b -> FuzzyStor k c
-    go st1 [] = f1 st1
-    go [] st2 = f2 st2
+    go m1 [] = f1 m1
+    go [] m2 = f2 m2
     go st1 st2
-      = let (only1, both) = process st1 st2
-            (only2, _)    = process st2 st1
+      = let (only1, both) = process1 m1 m2
+            (only2, _)    = process2 m1 m2
         in  (f1 only1) ++ both ++ (f2 only2)
     
-    process (kv1@(ks1,v1):st1) st2
-      = let (only, both) = process st1 st2
-        in  case lookupAny' ks1 st2 of
+    process1 (kv1@(ks1,v1):m1) m2
+      = let (only, both) = process1 m1 m2
+        in  case lookupAny' ks1 m2 of
               Just (ks2,v2) -> let kv = maybeToList $ f ks1 v1 ks2 v2
                                in  (only, kv ++ both)
               Nothing       -> (kv1:only, both)
 
+    process2 m1 (kv2@(ks2,v2):m2)
+      = let (only, both) = process2 m1 m2
+        in  case lookupAny' ks2 m1 of
+              Just (ks1,v1) -> let kv = maybeToList $ f ks1 v1 ks2 v2
+                               in  (only, kv ++ both)
+              Nothing       -> (kv2:only, both)
 
-intersects :: Set a -> Set a -> Bool
-intersects s1 s2 = not null $ Set.intersection s1 s2
+
+intersects :: Ord a => Set a -> Set a -> Bool
+intersects s1 s2 = not $ Set.null $ Set.intersection s1 s2
 
 
--- Stor manipulation
+-- Stor manipulation (legacy, will be removed)
 -------------------------------------------------------------------------------
 
 modifyStor :: (FuzzyStor k a -> FuzzyStor k b) -> FuzzyMap k a -> FuzzyMap k b
-modifyStor f (FuzzyMap stor) = FuzzyMap (f stor)
+modifyStor = id
 
 
 stor :: FuzzyMap k a -> FuzzyStor k a
-stor (FuzzyMap stor) = stor
+stor m = m
 
 
 lookupIndex :: Ord k => FuzzyStor k a -> k -> Maybe Int
