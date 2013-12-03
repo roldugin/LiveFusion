@@ -16,7 +16,7 @@ Library
     Data.LiveFusion.Util
     Data.LiveFusion.HsCodeGen
     Data.LiveFusion.HsEvaluator
-    Data.LiveFusion.FuzzyMap
+    Data.LiveFusion.AliasMap
 
   Other-Modules:
 

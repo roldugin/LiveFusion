@@ -6,8 +6,8 @@
 module Data.LiveFusion.Loop where
 
 import Data.LiveFusion.Util
-import Data.LiveFusion.FuzzyMap ( FuzzyMap )
-import qualified Data.LiveFusion.FuzzyMap as FMap
+import Data.LiveFusion.AliasMap ( AliasMap )
+import qualified Data.LiveFusion.AliasMap as AMap
 
 import Data.Map ( Map )
 import qualified Data.Map as Map
@@ -182,7 +182,7 @@ data Loop = Loop { -- | Loop entry block
 -- | A collection of statememt blocks identified by labels akin to asm labels.
 --
 --   Each block can be identified by multiple labels. A new synonym label can
---   be added useing 'FuzzyMap.addSynonym'.
+--   be added useing 'AliasMap.addSynonym'.
 --
 --   In the following example the block is both labelled 'init_0' and 'init_1'.
 -- @
@@ -191,7 +191,7 @@ data Loop = Loop { -- | Loop entry block
 --     let x = 42
 --     let y = 1984
 -- @
-type BlockMap = FuzzyMap Label Block
+type BlockMap = AliasMap Label Block
 
 
 -- | Reduces a set of labels to one specific label.
@@ -214,11 +214,11 @@ theSynonymLabel lbls l = theOneLabel $ synonyms
 
 addSynonymLabel :: Label -> Label -> Loop -> Loop
 addSynonymLabel nu old loop
-  = loop { loopBlockMap = FMap.addSynonym nu old (loopBlockMap loop) }
+  = loop { loopBlockMap = AMap.addSynonym nu old (loopBlockMap loop) }
 
 
 loopBlocks :: Loop -> [Block]
-loopBlocks = FMap.elems . loopBlockMap
+loopBlocks = AMap.elems . loopBlockMap
 
 
 updateBlock :: Label -> (Block -> Block) -> Loop -> Loop
@@ -232,13 +232,13 @@ updateBlock lbl f loop = putBlock lbl block' loop
 getBlock :: Label -> Loop -> Block
 getBlock lbl loop = fromMaybe emptyBlock maybeBlock
   where
-    maybeBlock = FMap.lookup lbl (loopBlockMap loop)
+    maybeBlock = AMap.lookup lbl (loopBlockMap loop)
 
 
 putBlock :: Label -> Block -> Loop -> Loop
 putBlock lbl blk loop = loop { loopBlockMap = loopBlockMap' }
   where
-    loopBlockMap' = FMap.insert lbl blk (loopBlockMap loop)
+    loopBlockMap' = AMap.insert lbl blk (loopBlockMap loop)
 
 
 -- Append a statement to the specified code block
@@ -298,7 +298,7 @@ setArrResultOnly i = unsetScalarResult
 --------------------------------------------------------------------------------
 
 pprBlockMap :: BlockMap -> String
-pprBlockMap = unlines . map pprOne . FMap.assocs
+pprBlockMap = unlines . map pprOne . AMap.assocs
   where
     pprOne (lbls, blk) = (pprLabels lbls) ++\
                          (indent 1 $ pprBlock blk)
@@ -607,9 +607,9 @@ rewriteLoopLabels loop
   = loop { loopBlockMap = newBlockMap
          , loopEntry    = newEntry }
   where
-    lbls = FMap.keys $ loopBlockMap loop
+    lbls = AMap.keys $ loopBlockMap loop
     newEntry = theSynonymLabel lbls <$> loopEntry loop
-    newBlockMap = FMap.map (rewriteBlockLabels lbls) (loopBlockMap loop)
+    newBlockMap = AMap.map (rewriteBlockLabels lbls) (loopBlockMap loop)
 
 
 insertResultArray :: Loop -> Loop
@@ -645,7 +645,7 @@ insertResultArray loop
 --         known to the block. This won't be possible if the declaration comes after
 --         the control transfer.
 reorderDecls :: Loop -> Loop
-reorderDecls loop = loop { loopBlockMap = FMap.map perblock (loopBlockMap loop) }
+reorderDecls loop = loop { loopBlockMap = AMap.map perblock (loopBlockMap loop) }
   where
     perblock (Block stmts final) = Block (reorder stmts) final
 
@@ -657,13 +657,13 @@ reorderDecls loop = loop { loopBlockMap = FMap.map perblock (loopBlockMap loop) 
     isDecl _            = False
 
 instance Monoid Loop where
-  mempty = Loop Nothing Map.empty Nothing Nothing FMap.empty
+  mempty = Loop Nothing Map.empty Nothing Nothing AMap.empty
   mappend loop1 loop2
     = Loop { loopEntry        = loopEntry    `joinWith` (<|>)
            , loopArgs         = loopArgs     `joinWith` Map.union
            , loopArrResult    = Nothing
            , loopScalarResult = Nothing
-           , loopBlockMap     = loopBlockMap `joinWith` FMap.unionWith appendLoopBlockMap
+           , loopBlockMap     = loopBlockMap `joinWith` AMap.unionWith appendLoopBlockMap
            }
     where
       joinWith :: (Loop  -> field)          -- field to take from loop

@@ -6,7 +6,7 @@ module Data.LiveFusion.HsCodeGen where
 
 import Data.LiveFusion.Util
 import Data.LiveFusion.Loop as Lp
-import qualified Data.LiveFusion.FuzzyMap as FMap
+import qualified Data.LiveFusion.AliasMap as AMap
 
 import Language.Haskell.TH as TH
 
@@ -241,7 +241,7 @@ loopCode loop = pprint
   where
     codeGenBlock (lbl,blk) = cgBlock extEnv lbl blk
 
-    allBlocks = map (first theOneLabel) (FMap.assocs $ loopBlockMap loop)
+    allBlocks = map (first theOneLabel) (AMap.assocs $ loopBlockMap loop)
 
     extEnv    = extendedEnv loop -- Environment after variable and goto analyses
 

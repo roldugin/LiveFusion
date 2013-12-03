@@ -1,4 +1,4 @@
-module Data.LiveFusion.FuzzyMap where
+module Data.LiveFusion.AliasMap where
 
 import Control.Arrow ( first, second )
 import Data.Functor
@@ -10,14 +10,14 @@ import qualified Data.Set as Set
 import Prelude as P hiding ( lookup )
 
 
-type FuzzyStor k a = [(Set k, a)]
+type AliasStor k a = [(Set k, a)]
 
-type FuzzyMap k a = FuzzyStor k a
+type AliasMap k a = AliasStor k a
 			
 
 -- | Insert a new key and value in the map. If the key is already present in
 --   the map, the associated value is replaced with the supplied value.
-insert :: Ord k => k -> a -> FuzzyMap k a -> FuzzyMap k a
+insert :: Ord k => k -> a -> AliasMap k a -> AliasMap k a
 insert k v = modifyStor insert'
   where
     insert' stor = case lookupIndex stor k of
@@ -28,11 +28,11 @@ insert k v = modifyStor insert'
     replaceVal       = second (const v)
 
 
-member :: Ord k => k -> FuzzyMap k a -> Bool
+member :: Ord k => k -> AliasMap k a -> Bool
 member k m = isJust $ lookup k m
 
 
-notMember :: Ord k => k -> FuzzyMap k a -> Bool
+notMember :: Ord k => k -> AliasMap k a -> Bool
 notMember = (not .) . member
 
 
@@ -48,7 +48,7 @@ notMember = (not .) . member
 -- Implementation warning: The above rules are followed to author's best knowledge.
 -- However, one must be careful dealing with the case where 'new == old' and not to
 -- remove the 'new' key prematurely.
-addSynonym :: Ord k => k -> k -> FuzzyMap k a -> FuzzyMap k a
+addSynonym :: Ord k => k -> k -> AliasMap k a -> AliasMap k a
 addSynonym new old = modifyStor (L.map (first adjustKeys))
   where
     adjustKeys keys
@@ -58,56 +58,56 @@ addSynonym new old = modifyStor (L.map (first adjustKeys))
 
 
 
-(!) :: Ord k => FuzzyMap k a -> k -> a
+(!) :: Ord k => AliasMap k a -> k -> a
 (!) m k = fromMaybe err (lookup k m)
-  where err = error "FuzzyMap.!: element not in the map"
+  where err = error "AliasMap.!: element not in the map"
 
 
-lookup :: Ord k => k -> FuzzyMap k a -> Maybe a
+lookup :: Ord k => k -> AliasMap k a -> Maybe a
 lookup k m = snd <$> lookup' k m
 
 
-lookup' :: Ord k => k -> FuzzyMap k a -> Maybe (Set k, a)
+lookup' :: Ord k => k -> AliasMap k a -> Maybe (Set k, a)
 lookup' k m = L.find containKey (stor m)
   where containKey = (k `Set.member`) . fst
 
 
-lookupAny :: Ord k => Set k -> FuzzyMap k a -> Maybe a
+lookupAny :: Ord k => Set k -> AliasMap k a -> Maybe a
 lookupAny ks m = snd <$> lookupAny' ks m
 
 
-lookupAny' :: Ord k => Set k -> FuzzyMap k a -> Maybe (Set k, a)
+lookupAny' :: Ord k => Set k -> AliasMap k a -> Maybe (Set k, a)
 lookupAny' ks m = L.find containKeys (stor m)
   where containKeys = intersects ks . fst
 
 
 -- | /O(n)/. Return all synomyms of a given key.
-synonyms :: Ord k => k -> FuzzyMap k a -> Set k
+synonyms :: Ord k => k -> AliasMap k a -> Set k
 synonyms k m = fst $ fromMaybe err (lookup' k m)
-  where err = error "FuzzyMap.synonyms: element not in the map"
+  where err = error "AliasMap.synonyms: element not in the map"
 
 
-empty :: FuzzyMap k a
+empty :: AliasMap k a
 empty = []
 
 
-elems :: FuzzyMap k a -> [a]
+elems :: AliasMap k a -> [a]
 elems = L.map snd . stor
 
 
 -- | /O(n)/. Return all keys of the map in ascending order.
-keys :: FuzzyMap k a -> [Set k]
+keys :: AliasMap k a -> [Set k]
 keys = L.map fst . stor
 
 
 -- | /O(n)/. An alias for toAscList. Return all key/value pairs in the map in
 --   ascending key order.
-assocs :: FuzzyMap k a -> [(Set k, a)]
+assocs :: AliasMap k a -> [(Set k, a)]
 assocs = stor
 
 
 -- | /O(n)/. Map a function over all values in the map.
-map :: (a -> b) -> FuzzyMap k a -> FuzzyMap k b
+map :: (a -> b) -> AliasMap k a -> AliasMap k b
 map f = modifyStor mapVals
   where mapVals = L.map (second f)
 
@@ -124,30 +124,30 @@ map f = modifyStor mapVals
 --   Note that such a stategy may produce an ill formed loop with duplicate keys
 --   as in the above example:
 -- > ... = fromList [([1,2,3],"a"), ([3,4],"b")] -- BAD!!
-union :: Ord k => FuzzyMap k a -> FuzzyMap k a -> FuzzyMap k a
+union :: Ord k => AliasMap k a -> AliasMap k a -> AliasMap k a
 union = unionWith const
 
 
 unionWith :: Ord k => (a -> a -> a)
-          -> FuzzyMap k a
-          -> FuzzyMap k a
-          -> FuzzyMap k a
+          -> AliasMap k a
+          -> AliasMap k a
+          -> AliasMap k a
 unionWith f = unionWithKeys (\_ x y -> f x y)
 
 
 unionWithKeys :: Ord k => (Set k -> a -> a -> a)
-              -> FuzzyMap k a
-              -> FuzzyMap k a
-              -> FuzzyMap k a
+              -> AliasMap k a
+              -> AliasMap k a
+              -> AliasMap k a
 unionWithKeys f = mergeWithKeys (\ks x y -> Just $ f ks x y) id id
 
 
 mergeWithKeys :: Ord k => (Set k -> a -> b -> Maybe c)
-             -> (FuzzyMap k a -> FuzzyMap k c)
-             -> (FuzzyMap k b -> FuzzyMap k c)
-             -> FuzzyMap k a
-             -> FuzzyMap k b
-             -> FuzzyMap k c
+             -> (AliasMap k a -> AliasMap k c)
+             -> (AliasMap k b -> AliasMap k c)
+             -> AliasMap k a
+             -> AliasMap k b
+             -> AliasMap k c
 mergeWithKeys f = mergeWithKeys2 f'
   where
     f' ks1 v1 ks2 v2
@@ -160,11 +160,11 @@ mergeWithKeys f = mergeWithKeys2 f'
 
 
 mergeWithKeys2 :: Ord k => (Set k -> a -> Set k -> b -> Maybe (Set k,c))
-             -> (FuzzyMap k a -> FuzzyMap k c)
-             -> (FuzzyMap k b -> FuzzyMap k c)
-             -> FuzzyMap k a
-             -> FuzzyMap k b
-             -> FuzzyMap k c
+             -> (AliasMap k a -> AliasMap k c)
+             -> (AliasMap k b -> AliasMap k c)
+             -> AliasMap k a
+             -> AliasMap k b
+             -> AliasMap k c
 mergeWithKeys2 f f1 f2 m1 m2 = go m1 m2
   where
     go m1 [] = f1 m1
@@ -195,28 +195,28 @@ intersects :: Ord a => Set a -> Set a -> Bool
 intersects s1 s2 = not $ Set.null $ Set.intersection s1 s2
 
 
-fromList :: Ord k => [(Set k, a)] -> FuzzyMap k a
+fromList :: Ord k => [(Set k, a)] -> AliasMap k a
 fromList = id
 
-fromList1 :: Ord k => [(k,a)] -> FuzzyMap k a
+fromList1 :: Ord k => [(k,a)] -> AliasMap k a
 fromList1 = fromListL . L.map (first return)
 
-fromListL :: Ord k => [([k],a)] -> FuzzyMap k a
+fromListL :: Ord k => [([k],a)] -> AliasMap k a
 fromListL = fromList . L.map (first Set.fromList)
 
 
 -- Stor manipulation (legacy, will be removed)
 -------------------------------------------------------------------------------
 
-modifyStor :: (FuzzyStor k a -> FuzzyStor k b) -> FuzzyMap k a -> FuzzyMap k b
+modifyStor :: (AliasStor k a -> AliasStor k b) -> AliasMap k a -> AliasMap k b
 modifyStor = id
 
 
-stor :: FuzzyMap k a -> FuzzyStor k a
+stor :: AliasMap k a -> AliasStor k a
 stor m = m
 
 
-lookupIndex :: Ord k => FuzzyStor k a -> k -> Maybe Int
+lookupIndex :: Ord k => AliasStor k a -> k -> Maybe Int
 lookupIndex stor k = L.findIndex isAmongKeys stor
   where isAmongKeys = (k `Set.member`) . fst
 
