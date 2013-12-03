@@ -78,11 +78,7 @@ emptyBlock = Block [] Nothing
 
 
 blockStmts :: Block -> [Stmt]
-blockStmts (Block stmts _final) = stmts
-
-
-blockFinal :: Block -> Maybe Stmt
-blockFinal (Block _stmts final) = final
+blockStmts (Block stmts final) = stmts ++ maybeToList final
 
 
 addStmtsToBlock :: [Stmt] -> Block -> Block
@@ -118,23 +114,23 @@ instance Show Label where
 -- Statements
 -------------------------------------------------------------------------------
 
-data Stmt = Bind Var Expr
+data Stmt = Bind   Var Expr
           | Assign Var Expr
-          | Case Var Label Label
-          | Guard Var Label
-          | Goto Label
+          | Case   Var Label Label
+          | Guard  Var Label
+          | Goto   Label
+          | Return Var
           -- Array statements.
           -- They are here because they are stateful operations.
           -- Perhaps there is a cleaner way to do this.
-          | NewArray Var {- Array name -}
-                     Var {- Array length -}
+          | NewArray   Var {- Array name -}
+                       Var {- Array length -}
           | WriteArray Var {- Array name -}
                        Var {- Index -}
                        Var {- Element -}
           | SliceArray Var {- New array name (TODO: ugly) -}
                        Var {- Array name -}
                        Var {- Array length -}
-          | Return Var
 
 
 bindStmt     = Bind
@@ -142,10 +138,10 @@ assignStmt   = Assign
 caseStmt     = Case
 guardStmt    = Guard
 gotoStmt     = Goto
+returnStmt   = Return
 newArrStmt   = NewArray
 writeArrStmt = WriteArray
 sliceArrStmt = SliceArray
-returnStmt   = Return
 
 
 rewriteStmtLabels :: [Set Label] -> Stmt -> Stmt
@@ -324,6 +320,7 @@ pprStmt (WriteArray arr i x)    = pprVar arr ++ "[" ++ pprVar i ++ "] := " ++ pp
 pprStmt (SliceArray arr' arr n) = pprVar arr' ++ " = sliceArray " ++ pprVar arr ++ " " ++ pprVar n
 pprStmt (Return v)     = "return " ++ pprVar v
 pprStmt _              = "Unknown Stmt"
+
 
 pprLabel :: Label -> String
 pprLabel = show
@@ -529,6 +526,12 @@ blockEnv blk = foldl (flip analyse) emptyEnv (blockStmts blk)
 
 
 -- | Transitive environment assumptions
+--
+--   That is, all of the variables that will be required by the block with the
+--   given label as well as any other block to where the control may end up.
+--
+--   This does not include variables that are bound by this of the future blocks.
+--   These are conceptually all the free variables of the block and its futures.
 type VarMap = Map Label [Var]
 
 

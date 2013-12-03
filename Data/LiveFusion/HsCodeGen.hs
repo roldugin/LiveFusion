@@ -16,6 +16,7 @@ import Data.List
 import Data.Functor.Identity
 import System.IO.Unsafe ( unsafePerformIO )
 import Control.Arrow ( first )
+import Data.Maybe
 
 -- Modules required for code generation
 import qualified Data.Vector.Unboxed as V
@@ -23,6 +24,7 @@ import qualified Data.Vector.Unboxed.Mutable as MV
 import Control.Monad.ST.Strict
 import Control.Monad.Primitive
 import Data.Dynamic
+
 
 -- | Generate a TH function represeting a code block of a loop.
 --
@@ -40,7 +42,7 @@ cgBlock emap lbl blk@(Block stmts final) = blockFun
           (Guard p lbl) -> return {- a sinleton list -}
                         $ cgGuardStmt emap dirtyVars   -- environment stuff
                                       p    lbl         -- guard parameters
-                                      (cgStmts rest) -- statements following the guard
+                                      (cgStmts rest)   -- statements following the guard
           _             -> (cgStmt emap dirtyVars stmt) : (cgStmts rest)
     cgStmts [] = []
 
