@@ -58,6 +58,7 @@ data DET e where
   Scan     :: Elt a => (a -> a -> a) -> a -> ArrayDET a -> ArrayDET a
   Fold_s   :: Elt a => (a -> a -> a) -> a -> ArrayDET Int -> ArrayDET a -> ArrayDET a
   Manifest :: Elt a => V.Vector a -> ArrayDET a
+  Scalar   :: Elt a => a -> DET a
 
 -- Required for getting data-reify to work with GADTs
 data WrappedDET s where
@@ -75,6 +76,7 @@ data DEG e s where
   FoldG     :: Elt a => (a -> a -> a) -> a -> ArrayDEG a s -> DEG a s
   ScanG     :: Elt a => (a -> a -> a) -> a -> ArrayDEG a s -> ArrayDEG a s
   ManifestG :: Elt a => V.Vector a -> ArrayDEG a s
+  ScalarG   :: Elt a => a -> DEG a s
   Fold_sG   :: Elt a => (a -> a -> a) -> a -> ArrayDEG Int s -> ArrayDEG a s -> ArrayDEG a s
   VarG      :: Typeable e => s -> DEG e s
 
@@ -98,8 +100,9 @@ instance Typeable e => MuRef (DET e) where
       mapDeRef' ap (Scan f z arr) = ScanG f z <$> (VarG <$> ap arr)
       mapDeRef' ap (Fold_s f z lens arr) = Fold_sG f z <$> (VarG <$> ap lens) <*> (VarG <$> ap arr)
       mapDeRef' ap (Manifest vec) = pure $ ManifestG vec
+      mapDeRef' ap (Scalar x)     = pure $ ScalarG x
 
--- This is confusing as the moment: Var refers Unique that identifies the tree node we want to fetch
+-- This is confusing at the moment: Var refers Unique that identifies the tree node we want to fetch
 getDETNode :: Typeable e => Map Unique (WrappedDET Unique) -> Unique -> Maybe (DEG e Unique)
 getDETNode m n = case m ! n of Wrap  e -> cast e
 
