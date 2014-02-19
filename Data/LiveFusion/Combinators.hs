@@ -47,38 +47,124 @@ instance Elt Double
 instance Elt Bool
 instance (Elt a, Elt b) => Elt (a,b)
 
+
 type ArrayDET a = DET (V.Vector a)
 
+
+-- | Delayed Evaluation Tree
 data DET e where
-  Map      :: (Elt a, Elt b) => (a -> b) -> ArrayDET a -> ArrayDET b
-  Filter   :: Elt a => (a -> Bool) -> ArrayDET a -> ArrayDET a
-  ZipWith  :: (Elt a, Elt b, Elt c) => (a -> b -> c) -> ArrayDET a -> ArrayDET b -> ArrayDET c
-  Zip      :: (Elt a, Elt b) => ArrayDET a -> ArrayDET b -> ArrayDET (a,b)
-  Fold     :: Elt a => (a -> a -> a) -> a -> ArrayDET a -> DET a
-  Scan     :: Elt a => (a -> a -> a) -> a -> ArrayDET a -> ArrayDET a
-  Fold_s   :: Elt a => (a -> a -> a) -> a -> ArrayDET Int -> ArrayDET a -> ArrayDET a
-  Manifest :: Elt a => V.Vector a -> ArrayDET a
-  Scalar   :: Elt a => a -> DET a
+  Map      :: (Elt a, Elt b)
+           => (a -> b)
+           -> ArrayDET a
+           -> ArrayDET b
+
+  Filter   :: Elt a
+           => (a -> Bool)
+           -> ArrayDET a
+           -> ArrayDET a
+
+  ZipWith  :: (Elt a, Elt b, Elt c)
+           => (a -> b -> c)
+           -> ArrayDET a
+           -> ArrayDET b
+           -> ArrayDET c
+
+  Zip      :: (Elt a, Elt b)
+           => ArrayDET a
+           -> ArrayDET b
+           -> ArrayDET (a,b)
+
+  Fold     :: Elt a
+           => (a -> a -> a)
+           -> a
+           -> ArrayDET a
+           -> DET a
+
+  Scan     :: Elt a
+           => (a -> a -> a)
+           -> a
+           -> ArrayDET a
+           -> ArrayDET a
+
+  Fold_s   :: Elt a
+           => (a -> a -> a)
+           -> a
+           -> ArrayDET Int
+           -> ArrayDET a
+           -> ArrayDET a
+
+  Manifest :: Elt a
+           => V.Vector a
+           -> ArrayDET a
+
+  Scalar   :: Elt a
+           => a
+           -> DET a
+
 
 -- Required for getting data-reify to work with GADTs
 data WrappedDET s where
   Wrap :: Typeable e => DEG e s -> WrappedDET s
 
+
 deriving instance Show (WrappedDET Unique)
+
 
 type ArrayDEG a s = DEG (V.Vector a) s
 
+
+-- | Delayed Evaluation Graph
 data DEG e s where
-  MapG      :: (Elt a, Elt b) => (a -> b) -> ArrayDEG a s -> ArrayDEG b s
-  FilterG   :: Elt a => (a -> Bool) -> ArrayDEG a s -> ArrayDEG a s
-  ZipWithG  :: (Elt a, Elt b, Elt c) => (a -> b -> c) -> ArrayDEG a s -> ArrayDEG b s -> ArrayDEG c s
-  ZipG      :: (Elt a, Elt b) => ArrayDEG a s -> ArrayDEG b s -> ArrayDEG (a,b) s
-  FoldG     :: Elt a => (a -> a -> a) -> a -> ArrayDEG a s -> DEG a s
-  ScanG     :: Elt a => (a -> a -> a) -> a -> ArrayDEG a s -> ArrayDEG a s
-  ManifestG :: Elt a => V.Vector a -> ArrayDEG a s
-  ScalarG   :: Elt a => a -> DEG a s
-  Fold_sG   :: Elt a => (a -> a -> a) -> a -> ArrayDEG Int s -> ArrayDEG a s -> ArrayDEG a s
-  VarG      :: Typeable e => s -> DEG e s
+  MapG      :: (Elt a, Elt b)
+            => (a -> b)
+            -> ArrayDEG a s
+            -> ArrayDEG b s
+
+  FilterG   :: Elt a
+            => (a -> Bool)
+            -> ArrayDEG a s
+            -> ArrayDEG a s
+
+  ZipWithG  :: (Elt a, Elt b, Elt c)
+            => (a -> b -> c)
+            -> ArrayDEG a s
+            -> ArrayDEG b s
+            -> ArrayDEG c s
+
+  ZipG      :: (Elt a, Elt b)
+            => ArrayDEG a s
+            -> ArrayDEG b s
+            -> ArrayDEG (a,b) s
+
+  FoldG     :: Elt a
+            => (a -> a -> a)
+            -> a
+            -> ArrayDEG a s
+            -> DEG a s
+
+  ScanG     :: Elt a => (a -> a -> a)
+            -> a
+            -> ArrayDEG a s
+            -> ArrayDEG a s
+
+  ManifestG :: Elt a
+            => V.Vector a
+            -> ArrayDEG a s
+
+  ScalarG   :: Elt a
+            => a
+            -> DEG a s
+
+  Fold_sG   :: Elt a
+            => (a -> a -> a)
+            -> a
+            -> ArrayDEG Int s
+            -> ArrayDEG a s
+            -> ArrayDEG a s
+
+  VarG      :: Typeable e
+            => s
+            -> DEG e s
 
 
 deriving instance Show s => Show (DEG e s)
@@ -92,15 +178,43 @@ instance Typeable e => MuRef (DET e) where
                 => (forall b. (MuRef b, WrappedDET ~ DeRef b) => b -> ap u)
                 -> DET e
                 -> ap (DEG e u)
-      mapDeRef' ap (Map f arr)    = MapG f <$> (VarG <$> ap arr)
-      mapDeRef' ap (Filter p arr) = FilterG p <$> (VarG <$> ap arr)
-      mapDeRef' ap (ZipWith f arr brr) = ZipWithG f <$> (VarG <$> ap arr) <*> (VarG <$> ap brr)
-      mapDeRef' ap (Zip arr brr)  = ZipG <$> (VarG <$> ap arr) <*> (VarG <$> ap brr)
-      mapDeRef' ap (Fold f z arr) = FoldG f z <$> (VarG <$> ap arr)
-      mapDeRef' ap (Scan f z arr) = ScanG f z <$> (VarG <$> ap arr)
-      mapDeRef' ap (Fold_s f z lens arr) = Fold_sG f z <$> (VarG <$> ap lens) <*> (VarG <$> ap arr)
-      mapDeRef' ap (Manifest vec) = pure $ ManifestG vec
-      mapDeRef' ap (Scalar x)     = pure $ ScalarG x
+
+      mapDeRef' ap (Map f arr)
+        = MapG f
+          <$> (VarG <$> ap arr)
+
+      mapDeRef' ap (Filter p arr)
+        = FilterG p
+          <$> (VarG <$> ap arr)
+
+      mapDeRef' ap (ZipWith f arr brr)
+        = ZipWithG f
+          <$> (VarG <$> ap arr)
+          <*> (VarG <$> ap brr)
+
+      mapDeRef' ap (Zip arr brr)
+        = ZipG
+          <$> (VarG <$> ap arr)
+          <*> (VarG <$> ap brr)
+
+      mapDeRef' ap (Fold f z arr)
+        = FoldG f z
+          <$> (VarG <$> ap arr)
+
+      mapDeRef' ap (Scan f z arr)
+        = ScanG f z
+          <$> (VarG <$> ap arr)
+
+      mapDeRef' ap (Fold_s f z lens arr)
+        = Fold_sG f z
+          <$> (VarG <$> ap lens)
+          <*> (VarG <$> ap arr)
+
+      mapDeRef' ap (Manifest vec)
+        = pure $ ManifestG vec
+
+      mapDeRef' ap (Scalar x)
+        = pure $ ScalarG x
 
 -- This is confusing at the moment: Var refers Unique that identifies the tree node we want to fetch
 getDETNode :: Typeable e => Map Unique (WrappedDET Unique) -> Unique -> Maybe (DEG e Unique)
