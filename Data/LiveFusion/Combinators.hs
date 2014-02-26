@@ -5,6 +5,7 @@ import Data.LiveFusion.Loop as Loop
 import Data.LiveFusion.Util
 import Data.LiveFusion.HsEvaluator
 import Data.LiveFusion.HsCodeGen -- only for testing
+import Data.LiveFusion.Types ( Elt )
 
 import qualified Data.Vector.Unboxed as V
 import Prelude hiding ( map, zip, filter, zipWith )
@@ -38,14 +39,6 @@ tr a = trace (show a) a
 uc = unsafeCoerce
 
 ucText = "unsafeCoerce"
-
-class (Show a, V.Unbox a, Typeable a) => Elt a
-
-instance Elt Int
-instance Elt Float
-instance Elt Double
-instance Elt Bool
-instance (Elt a, Elt b) => Elt (a,b)
 
 
 type ArrayDET a = DET (V.Vector a)
