@@ -17,6 +17,9 @@ Library
     Data.LiveFusion.HsCodeGen
     Data.LiveFusion.HsEvaluator
     Data.LiveFusion.AliasMap
+    Data.LiveFusion.HSBackend
+    Data.LiveFusion.HSBackend.THDefinitions
+    Data.LiveFusion.Types
 
   Other-Modules:
 
