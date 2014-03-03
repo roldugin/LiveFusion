@@ -41,136 +41,140 @@ uc = unsafeCoerce
 ucText = "unsafeCoerce"
 
 
-type ArrayDET a = DET (V.Vector a)
+type ArrayAST a = AST (V.Vector a)
 
 
--- | Delayed Evaluation Tree
-data DET e where
+-- | Abstract Syntax Tree whose nodes represent delayed collective array operations.
+data AST e where
   Map      :: (Elt a, Elt b)
            => (a -> b)
-           -> ArrayDET a
-           -> ArrayDET b
+           -> ArrayAST a
+           -> ArrayAST b
 
   Filter   :: Elt a
            => (a -> Bool)
-           -> ArrayDET a
-           -> ArrayDET a
+           -> ArrayAST a
+           -> ArrayAST a
 
   ZipWith  :: (Elt a, Elt b, Elt c)
            => (a -> b -> c)
-           -> ArrayDET a
-           -> ArrayDET b
-           -> ArrayDET c
+           -> ArrayAST a
+           -> ArrayAST b
+           -> ArrayAST c
 
   Zip      :: (Elt a, Elt b)
-           => ArrayDET a
-           -> ArrayDET b
-           -> ArrayDET (a,b)
+           => ArrayAST a
+           -> ArrayAST b
+           -> ArrayAST (a,b)
 
   Fold     :: Elt a
            => (a -> a -> a)
            -> a
-           -> ArrayDET a
-           -> DET a
+           -> ArrayAST a
+           -> AST a
 
   Scan     :: Elt a
            => (a -> a -> a)
            -> a
-           -> ArrayDET a
-           -> ArrayDET a
+           -> ArrayAST a
+           -> ArrayAST a
 
   Fold_s   :: Elt a
            => (a -> a -> a)
            -> a
-           -> ArrayDET Int
-           -> ArrayDET a
-           -> ArrayDET a
+           -> ArrayAST Int
+           -> ArrayAST a
+           -> ArrayAST a
 
   Manifest :: Elt a
            => V.Vector a
-           -> ArrayDET a
+           -> ArrayAST a
 
   Scalar   :: Elt a
            => a
-           -> DET a
+           -> AST a
 
 
 -- Required for getting data-reify to work with GADTs
-data WrappedDET s where
-  Wrap :: Typeable e => DEG e s -> WrappedDET s
+data WrappedAST s where
+  Wrap :: Typeable e => ASG e s -> WrappedAST s
 
 
-deriving instance Show (WrappedDET Unique)
+deriving instance Show (WrappedAST Unique)
 
 
-type ArrayDEG a s = DEG (V.Vector a) s
+type ArrayASG a s = ASG (V.Vector a) s
 
 
--- | Delayed Evaluation Graph
-data DEG e s where
+-- | Abstract Semantic Graph is a directed acyclic graph derived from the AST
+--   of delayed collective array operations by:
+--   * Replacing every point of recursion with a uniquely named variable
+--   * Eliminating common subexpressions and representing them as one node, reference by
+--     variables of the same name.
+data ASG e s where
   MapG      :: (Elt a, Elt b)
             => (a -> b)
-            -> ArrayDEG a s
-            -> ArrayDEG b s
+            -> ArrayASG a s
+            -> ArrayASG b s
 
   FilterG   :: Elt a
             => (a -> Bool)
-            -> ArrayDEG a s
-            -> ArrayDEG a s
+            -> ArrayASG a s
+            -> ArrayASG a s
 
   ZipWithG  :: (Elt a, Elt b, Elt c)
             => (a -> b -> c)
-            -> ArrayDEG a s
-            -> ArrayDEG b s
-            -> ArrayDEG c s
+            -> ArrayASG a s
+            -> ArrayASG b s
+            -> ArrayASG c s
 
   ZipG      :: (Elt a, Elt b)
-            => ArrayDEG a s
-            -> ArrayDEG b s
-            -> ArrayDEG (a,b) s
+            => ArrayASG a s
+            -> ArrayASG b s
+            -> ArrayASG (a,b) s
 
   FoldG     :: Elt a
             => (a -> a -> a)
             -> a
-            -> ArrayDEG a s
-            -> DEG a s
+            -> ArrayASG a s
+            -> ASG a s
 
   ScanG     :: Elt a => (a -> a -> a)
             -> a
-            -> ArrayDEG a s
-            -> ArrayDEG a s
+            -> ArrayASG a s
+            -> ArrayASG a s
 
   ManifestG :: Elt a
             => V.Vector a
-            -> ArrayDEG a s
+            -> ArrayASG a s
 
   ScalarG   :: Elt a
             => a
-            -> DEG a s
+            -> ASG a s
 
   Fold_sG   :: Elt a
             => (a -> a -> a)
             -> a
-            -> ArrayDEG Int s
-            -> ArrayDEG a s
-            -> ArrayDEG a s
+            -> ArrayASG Int s
+            -> ArrayASG a s
+            -> ArrayASG a s
 
   VarG      :: Typeable e
             => s
-            -> DEG e s
+            -> ASG e s
 
 
-deriving instance Show s => Show (DEG e s)
-deriving instance Typeable2 DEG
+deriving instance Show s => Show (ASG e s)
+deriving instance Typeable2 ASG
 
-instance Typeable e => MuRef (DET e) where
-  type DeRef (DET e) = WrappedDET
+instance Typeable e => MuRef (AST e) where
+  type DeRef (AST e) = WrappedAST
   mapDeRef ap e = Wrap <$> mapDeRef' ap e
     where
       mapDeRef' :: Applicative ap
-                => (forall b. (MuRef b, WrappedDET ~ DeRef b) => b -> ap u)
-                -> DET e
-                -> ap (DEG e u)
+                => (forall b. (MuRef b, WrappedAST ~ DeRef b) => b -> ap u)
+                -> AST e
+                -> ap (ASG e u)
 
       mapDeRef' ap (Map f arr)
         = MapG f
@@ -210,26 +214,26 @@ instance Typeable e => MuRef (DET e) where
         = pure $ ScalarG x
 
 -- This is confusing at the moment: Var refers Unique that identifies the tree node we want to fetch
-getDETNode :: Typeable e => Map Unique (WrappedDET Unique) -> Unique -> Maybe (DEG e Unique)
-getDETNode m n = case m ! n of Wrap  e -> cast e
+getASTNode :: Typeable e => Map Unique (WrappedAST Unique) -> Unique -> Maybe (ASG e Unique)
+getASTNode m n = case m ! n of Wrap  e -> cast e
 
-recoverSharing :: Typeable e => DET e -> IO (Map Unique (WrappedDET Unique), Unique, Maybe (DEG e Unique))
+recoverSharing :: Typeable e => AST e -> IO (Map Unique (WrappedAST Unique), Unique, Maybe (ASG e Unique))
 recoverSharing e = do
   Graph l n <- reifyGraph e
   let m = Map.fromList l
-  return (m, n, getDETNode m n)
+  return (m, n, getASTNode m n)
 {-# NOINLINE recoverSharing #-}
 
 
-fuse :: Typeable e => Map Unique (WrappedDET Unique) -> (DEG e Unique) -> Unique -> (Loop, Unique)
+fuse :: Typeable e => Map Unique (WrappedAST Unique) -> (ASG e Unique) -> Unique -> (Loop, Unique)
 fuse env = fuse'
   where
-    fuse' :: Typeable e => (DEG e Unique) -> Unique -> (Loop, Unique)
+    fuse' :: Typeable e => (ASG e Unique) -> Unique -> (Loop, Unique)
     -- TODO: Unique id argument is essentially threaded through, can we abstract?
     fuse' var@(VarG uq) _
-        = let det = fromJust
-                  $ (getDETNode env uq) `asTypeOf` (Just var)
-          in  fuse' det uq
+        = let ast = fromJust
+                  $ (getASTNode env uq) `asTypeOf` (Just var)
+          in  fuse' ast uq
 
     fuse' (ManifestG vec) uq
         = let arrVar    = arrayVar uq
@@ -418,21 +422,21 @@ rebindIndexAndLengthVars nu old = rebindLengthVar nu old
 
 
 {-
-puginCode :: Typeable e => DET e -> String -> String -> IO (String, [Arg])
-pluginCode DET moduleName entryFnName = do
-  (env, rootUq, Just rootNode) <- recoverSharing DET
+puginCode :: Typeable e => AST e -> String -> String -> IO (String, [Arg])
+pluginCode AST moduleName entryFnName = do
+  (env, rootUq, Just rootNode) <- recoverSharing AST
   let (loop, resultVar) = fuse env rootNode rootUq
-      (bodyCode, args) = pluginEntryCode entryFnName (typeOf $ resultType DET) resultVar loop
+      (bodyCode, args) = pluginEntryCode entryFnName (typeOf $ resultType AST) resultVar loop
       code = preamble moduleName ++\ bodyCode
   return (code, args)
 
 
-justCode :: Typeable e => DET e -> IO ()
-justCode DET = putStrLn =<< indexed <$> fst <$> pluginCode DET "Plugin" "pluginEntry"
+justCode :: Typeable e => AST e -> IO ()
+justCode AST = putStrLn =<< indexed <$> fst <$> pluginCode AST "Plugin" "pluginEntry"
 -}
-fuseToLoop :: Typeable e => DET e -> IO Loop
-fuseToLoop det = do
-  (env, rootUq, Just rootNode) <- recoverSharing det
+fuseToLoop :: Typeable e => AST e -> IO Loop
+fuseToLoop ast = do
+  (env, rootUq, Just rootNode) <- recoverSharing ast
   let (loop, resultUq) = fuse env rootNode rootUq
   return loop
 
@@ -441,48 +445,48 @@ resultType :: t a -> a
 resultType _ = undefined
 
 
-instance Show (DET e) where
-  show (Map _ arr) = "MapDET (" P.++ (show arr) P.++ ")"
-  show (Filter _ arr) = "FilterDET (" P.++ (show arr) P.++ ")"
-  show (ZipWith _ arr brr) = "ZipWithDET (" P.++ (show arr) P.++ ") (" P.++ (show brr) P.++ ")"
-  show (Zip arr brr) = "ZipDET (" P.++ (show arr) P.++ ") (" P.++ (show brr) P.++ ")"
-  show (Fold _ _ arr) = "FoldDET (" P.++ (show arr) P.++ ")"
+instance Show (AST e) where
+  show (Map _ arr) = "MapAST (" P.++ (show arr) P.++ ")"
+  show (Filter _ arr) = "FilterAST (" P.++ (show arr) P.++ ")"
+  show (ZipWith _ arr brr) = "ZipWithAST (" P.++ (show arr) P.++ ") (" P.++ (show brr) P.++ ")"
+  show (Zip arr brr) = "ZipAST (" P.++ (show arr) P.++ ") (" P.++ (show brr) P.++ ")"
+  show (Fold _ _ arr) = "FoldAST (" P.++ (show arr) P.++ ")"
   show (Manifest vec) = show vec
 
---map :: (Elt a, Elt b) => (a -> b) -> ArrayDET a -> ArrayDET b
+--map :: (Elt a, Elt b) => (a -> b) -> ArrayAST a -> ArrayAST b
 --map f = Map f
 
---filter :: (Elt a) => (a -> Bool) -> ArrayDET a -> ArrayDET a
+--filter :: (Elt a) => (a -> Bool) -> ArrayAST a -> ArrayAST a
 --filter p = Filter p
 
---zipWith :: (Elt a, Elt b, Elt c) => (a -> b -> c) -> ArrayDET a -> ArrayDET b -> DET (V.Vector c)
+--zipWith :: (Elt a, Elt b, Elt c) => (a -> b -> c) -> ArrayAST a -> ArrayAST b -> AST (V.Vector c)
 --zipWith f arr brr = ZipWith f arr brr
 
---zip :: (Elt a, Elt b) => ArrayDET a -> ArrayDET b -> DET (V.Vector (a,b))
+--zip :: (Elt a, Elt b) => ArrayAST a -> ArrayAST b -> AST (V.Vector (a,b))
 --zip arr brr = Zip arr brr
 
---fold :: Elt a => (a -> a -> a) -> a -> ArrayDET a -> a
---fold f z arr = evalDET $ Fold f z arr
+--fold :: Elt a => (a -> a -> a) -> a -> ArrayAST a -> a
+--fold f z arr = evalAST $ Fold f z arr
 
---toList :: Elt a => ArrayDET a -> [a]
+--toList :: Elt a => ArrayAST a -> [a]
 --toList = V.toList . eval
-fromList :: Elt a => [a] -> ArrayDET a
+fromList :: Elt a => [a] -> ArrayAST a
 fromList = Manifest . V.fromList
 
 
-eval :: Elt a => ArrayDET a -> V.Vector a
+eval :: Elt a => ArrayAST a -> V.Vector a
 eval (Manifest vec) = vec
-eval op = evalDET op
+eval op = evalAST op
 
-evalDET :: Typeable a => DET a -> a
-evalDET det = result
+evalAST :: Typeable a => AST a -> a
+evalAST ast = result
   where
-    loop = getLoop det
+    loop = getLoop ast
     dynResult = evalLoop loop
     result = fromJust $ fromDynamic dynResult
-{-# NOINLINE evalDET #-}
+{-# NOINLINE evalAST #-}
 
-getLoop :: Typeable a => DET a -> Loop
+getLoop :: Typeable a => AST a -> Loop
 getLoop = postprocessLoop . unsafePerformIO . fuseToLoop
 {-# NOINLINE getLoop #-}
 
@@ -490,7 +494,7 @@ getLoop = postprocessLoop . unsafePerformIO . fuseToLoop
 fl = Data.LiveFusion.Combinators.fromList
 
 
-example0 :: ArrayDET Int
+example0 :: ArrayAST Int
 example0 = ZipWith (+)
         (fl [1,2,3])
       $ Scan (+) 0 $ Filter (const True) $ Map (+1) $ fl [4,5,6]
@@ -506,35 +510,35 @@ runTests = do
                 , testZipWithG, {- testZip1, -} testShare, testManyMaps]
   runTest testMZW
 
-test1 :: ArrayDET Int
+test1 :: ArrayAST Int
 test1 = zipWith (*) (map (+1) $ fl [1,2,3,4,5,6,7,8]) (zipWith (+) (filter (<0) $ fl $ take 20 [-8,-7..]) (map (\x->x*2+1) $ fl [1..8]))
 
-testMap1 :: ArrayDET Int
+testMap1 :: ArrayAST Int
 testMap1 = map (\x->x*2+1) $ fl [1..8]
 
-testFilt1 :: ArrayDET Int
+testFilt1 :: ArrayAST Int
 testFilt1 = filter (<0) $ fl $ take 20 [-8,-7..]
 
-testZipWith1 :: ArrayDET Int
+testZipWith1 :: ArrayAST Int
 testZipWith1 = zipWith (+) testMap1 testFilt1
 
-testMapG :: ArrayDET Int
+testMapG :: ArrayAST Int
 testMapG = map (+1) $ fl [1,2,3,4,5,6,7,8]
 
-testZipWithG :: ArrayDET Int
+testZipWithG :: ArrayAST Int
 testZipWithG = zipWith (*) testMapG testZipWith1
 
-testZip1 :: ArrayDET Int
+testZip1 :: ArrayAST Int
 testZip1 = map (uncurry (*)) $ zip testMapG testZipWith1
 
-testShare :: ArrayDET Int
+testShare :: ArrayAST Int
 testShare = zipWith (+) (map (+1) arr) (map (+2) arr)
   where arr = fl [1,2,3]
 
-testManyMaps :: ArrayDET Int
+testManyMaps :: ArrayAST Int
 testManyMaps = map (+1) $ map (+2) $ map (+3) $ fl [1,2,3]
 
-testMZW :: ArrayDET (Int,Double)
+testMZW :: ArrayAST (Int,Double)
 testMZW = zipWith k (zipWith g xs fys) (zipWith h fys zs)
   where k = (\l r -> (l+r,1.0))
         g = (*)
