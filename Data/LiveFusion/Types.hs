@@ -42,29 +42,35 @@ instance Num a => Num (Exp a) where
 
 data Exp a where
   ConstE :: a -> Exp a
-  ExtE :: Impl a -> Exp a
-  AppE :: Exp (a -> b) -> Exp a -> Exp b
+  FunE   :: Impl a -> Exp a
+  AppE   :: Exp (a -> b) -> Exp a -> Exp b
+
+
+instance Show (Exp a) where
+  show (ConstE x)  = "<>"
+  show (FunE impl) = show impl
+  show (AppE f x)  = show f ++ " " ++ show x
 
 
 instance Functor Exp where
-  fmap f x = ExtE (nofuse_pureImpl f) <*> x
+  fmap f x = FunE (nofuse_pureImpl f) <*> x
 instance Applicative Exp where
-  pure = ConstE
+  pure a = FunE (nofuse_pureImpl a)
   f <*> x = AppE f x
 
 plusExp, timesExp, minusExp :: Num a => Exp a -> Exp a -> Exp a
-plusExp x y = (ExtE plusImpl) <*> x <*> y
-timesExp x y = (ExtE timesImpl) <*> x <*> y
-minusExp x y = (ExtE timesImpl) <*> x <*> y
+plusExp x y = (FunE plusImpl) <*> x <*> y
+timesExp x y = (FunE timesImpl) <*> x <*> y
+minusExp x y = (FunE timesImpl) <*> x <*> y
 
 negateExp :: Num a => Exp a -> Exp a
-negateExp x = (ExtE negateImpl) <*> x
+negateExp x = (FunE negateImpl) <*> x
 
 absExp :: Num a => Exp a -> Exp a
-absExp x = (ExtE absImpl) <*> x
+absExp x = (FunE absImpl) <*> x
 
 signumExp :: Num a => Exp a -> Exp a
-signumExp x = (ExtE signumImpl) <*> x
+signumExp x = (FunE signumImpl) <*> x
 
 fromIntegerExp :: Num a => Integer -> Exp a
 fromIntegerExp = ConstE . fromInteger

@@ -5,7 +5,7 @@ import Data.LiveFusion.Loop as Loop
 import Data.LiveFusion.Util
 import Data.LiveFusion.HsEvaluator
 import Data.LiveFusion.HsCodeGen -- only for testing
-import Data.LiveFusion.Types ( Elt )
+import Data.LiveFusion.Types ( Elt, Exp )
 
 import qualified Data.Vector.Unboxed as V
 import Prelude hiding ( map, zip, filter, zipWith )
@@ -41,23 +41,24 @@ uc = unsafeCoerce
 ucText = "unsafeCoerce"
 
 
+type ScalarAST a = AST a
 type ArrayAST a = AST (V.Vector a)
 
 
 -- | Abstract Syntax Tree whose nodes represent delayed collective array operations.
 data AST e where
   Map      :: (Elt a, Elt b)
-           => (a -> b)
+           => Fun (a -> b)
            -> ArrayAST a
            -> ArrayAST b
 
   Filter   :: Elt a
-           => (a -> Bool)
+           => Fun (a -> Bool)
            -> ArrayAST a
            -> ArrayAST a
 
   ZipWith  :: (Elt a, Elt b, Elt c)
-           => (a -> b -> c)
+           => Fun (a -> b -> c)
            -> ArrayAST a
            -> ArrayAST b
            -> ArrayAST c
@@ -68,20 +69,20 @@ data AST e where
            -> ArrayAST (a,b)
 
   Fold     :: Elt a
-           => (a -> a -> a)
-           -> a
+           => Fun (a -> a -> a)
+           -> ScalarAST a
            -> ArrayAST a
-           -> AST a
+           -> ScalarAST a
 
   Scan     :: Elt a
-           => (a -> a -> a)
-           -> a
+           => Fun (a -> a -> a)
+           -> ScalarAST a
            -> ArrayAST a
            -> ArrayAST a
 
   Fold_s   :: Elt a
-           => (a -> a -> a)
-           -> a
+           => Fun (a -> a -> a)
+           -> ScalarAST a
            -> ArrayAST Int
            -> ArrayAST a
            -> ArrayAST a
@@ -91,20 +92,24 @@ data AST e where
            -> ArrayAST a
 
   Scalar   :: Elt a
-           => a
-           -> AST a
+           => Exp a
+           -> ScalarAST a
 
 
 -- Required for getting data-reify to work with GADTs
-data WrappedAST s where
-  Wrap :: Typeable e => ASG e s -> WrappedAST s
+data WrappedASG s where
+  Wrap :: Typeable e => ASG e s -> WrappedASG s
 
 
-deriving instance Show (WrappedAST Unique)
+deriving instance Show (WrappedASG Unique)
 
 
+type ScalarASG a s = ASG a s
 type ArrayASG a s = ASG (V.Vector a) s
 
+type family Fun a where
+  Fun (a -> b) = Exp a -> Fun b
+  Fun a = Exp a
 
 -- | Abstract Semantic Graph is a directed acyclic graph derived from the AST
 --   of delayed collective array operations by:
@@ -113,17 +118,17 @@ type ArrayASG a s = ASG (V.Vector a) s
 --     variables of the same name.
 data ASG e s where
   MapG      :: (Elt a, Elt b)
-            => (a -> b)
+            => Fun (a -> b)
             -> ArrayASG a s
             -> ArrayASG b s
 
   FilterG   :: Elt a
-            => (a -> Bool)
+            => Fun (a -> Bool)
             -> ArrayASG a s
             -> ArrayASG a s
 
   ZipWithG  :: (Elt a, Elt b, Elt c)
-            => (a -> b -> c)
+            => Fun (a -> b -> c)
             -> ArrayASG a s
             -> ArrayASG b s
             -> ArrayASG c s
@@ -134,13 +139,14 @@ data ASG e s where
             -> ArrayASG (a,b) s
 
   FoldG     :: Elt a
-            => (a -> a -> a)
-            -> a
+            => Fun (a -> a -> a)
+            -> ScalarASG a s
             -> ArrayASG a s
-            -> ASG a s
+            -> ScalarASG a s
 
-  ScanG     :: Elt a => (a -> a -> a)
-            -> a
+  ScanG     :: Elt a
+            => Fun (a -> a -> a)
+            -> ScalarASG a s
             -> ArrayASG a s
             -> ArrayASG a s
 
@@ -149,12 +155,12 @@ data ASG e s where
             -> ArrayASG a s
 
   ScalarG   :: Elt a
-            => a
-            -> ASG a s
+            => Exp a
+            -> ScalarASG a s
 
   Fold_sG   :: Elt a
-            => (a -> a -> a)
-            -> a
+            => Fun (a -> a -> a)
+            -> ScalarASG a s
             -> ArrayASG Int s
             -> ArrayASG a s
             -> ArrayASG a s
@@ -165,14 +171,14 @@ data ASG e s where
 
 
 deriving instance Show s => Show (ASG e s)
-deriving instance Typeable2 ASG
+deriving instance Typeable ASG
 
 instance Typeable e => MuRef (AST e) where
-  type DeRef (AST e) = WrappedAST
+  type DeRef (AST e) = WrappedASG
   mapDeRef ap e = Wrap <$> mapDeRef' ap e
     where
       mapDeRef' :: Applicative ap
-                => (forall b. (MuRef b, WrappedAST ~ DeRef b) => b -> ap u)
+                => (forall b. (MuRef b, WrappedASG ~ DeRef b) => b -> ap u)
                 -> AST e
                 -> ap (ASG e u)
 
@@ -195,16 +201,19 @@ instance Typeable e => MuRef (AST e) where
           <*> (VarG <$> ap brr)
 
       mapDeRef' ap (Fold f z arr)
-        = FoldG f z
-          <$> (VarG <$> ap arr)
+        = FoldG f
+          <$> (VarG <$> ap z)
+          <*> (VarG <$> ap arr)
 
       mapDeRef' ap (Scan f z arr)
-        = ScanG f z
-          <$> (VarG <$> ap arr)
+        = ScanG f
+          <$> (VarG <$> ap z)
+          <*> (VarG <$> ap arr)
 
       mapDeRef' ap (Fold_s f z lens arr)
-        = Fold_sG f z
-          <$> (VarG <$> ap lens)
+        = Fold_sG f
+          <$> (VarG <$> ap z)
+          <*> (VarG <$> ap lens)
           <*> (VarG <$> ap arr)
 
       mapDeRef' ap (Manifest vec)
@@ -214,10 +223,10 @@ instance Typeable e => MuRef (AST e) where
         = pure $ ScalarG x
 
 -- This is confusing at the moment: Var refers Unique that identifies the tree node we want to fetch
-getASTNode :: Typeable e => Map Unique (WrappedAST Unique) -> Unique -> Maybe (ASG e Unique)
+getASTNode :: Typeable e => Map Unique (WrappedASG Unique) -> Unique -> Maybe (ASG e Unique)
 getASTNode m n = case m ! n of Wrap  e -> cast e
 
-recoverSharing :: Typeable e => AST e -> IO (Map Unique (WrappedAST Unique), Unique, Maybe (ASG e Unique))
+recoverSharing :: Typeable e => AST e -> IO (Map Unique (WrappedASG Unique), Unique, Maybe (ASG e Unique))
 recoverSharing e = do
   Graph l n <- reifyGraph e
   let m = Map.fromList l
@@ -225,7 +234,7 @@ recoverSharing e = do
 {-# NOINLINE recoverSharing #-}
 
 
-fuse :: Typeable e => Map Unique (WrappedAST Unique) -> (ASG e Unique) -> Unique -> (Loop, Unique)
+fuse :: Typeable e => Map Unique (WrappedASG Unique) -> (ASG e Unique) -> Unique -> (Loop, Unique)
 fuse env = fuse'
   where
     fuse' :: Typeable e => (ASG e Unique) -> Unique -> (Loop, Unique)
@@ -288,7 +297,7 @@ fuse env = fuse'
 
               -- LOOP
               loop      = setArrResultOnly uq
-                        $ addArg fVar (toDyn f)
+                        -- >$ addArg fVar (toDyn f)
                         $ addStmts bodyStmts (bodyLbl uq)
                         $ rebindIndexAndLengthVars uq arr_uq
                         -- $ addDefaultControlFlow uq
@@ -317,7 +326,7 @@ fuse env = fuse'
 
               -- LOOP
               loop      = setArrResultOnly uq
-                        $ addArg fVar (toDyn f)
+                        -- >$ addArg fVar (toDyn f)
                         $ addStmts bodyStmts (bodyLbl uq)
                         $ rebindIndexAndLengthVars uq arr_uq -- be careful: arbitrary choice between a and b
                         -- $ addDefaultControlFlow uq
@@ -356,7 +365,7 @@ fuse env = fuse'
 
               -- LOOP
               loop      = setArrResultOnly uq
-                        $ addArg pVar (toDyn p)
+                        -- >$ addArg pVar (toDyn p)
                         $ addStmts initStmts (initLbl uq)
                         $ addStmts bodyStmts (bodyLbl uq)
                         $ addStmts writeStmts (writeLbl uq)
@@ -387,7 +396,7 @@ fuse env = fuse'
               -- LOOP
               loop      = setArrResult uq
                         $ setScalarResult accVar
-                        $ addArg fVar (toDyn f)
+                        -- >$ addArg fVar (toDyn f)
                         $ addArg zVar (toDyn z)
                         $ addStmts initStmts (initLbl uq)
                         $ addStmts bodyStmts (bodyLbl uq)
@@ -494,14 +503,14 @@ getLoop = postprocessLoop . unsafePerformIO . fuseToLoop
 fl = Data.LiveFusion.Combinators.fromList
 
 
-example0 :: ArrayAST Int
-example0 = ZipWith (+)
-        (fl [1,2,3])
-      $ Scan (+) 0 $ Filter (const True) $ Map (+1) $ fl [4,5,6]
+--example0 :: ArrayAST Int
+--example0 = ZipWith (+)
+--       (fl [1,2,3])
+--      $ Scan (+) 0 $ Filter (const True) $ Map (+1) $ fl [4,5,6]
 
 
-test0 :: IO ()
-test0 = print $ eval example0
+--test0 :: IO ()
+--test0 = print $ eval example0
 
 {-
 runTests = do
