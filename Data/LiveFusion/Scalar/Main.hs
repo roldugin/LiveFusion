@@ -1,12 +1,15 @@
+-- Copyright (c) [2013] Manuel M T Chakravarty.  All rights reserved.
+-- This module is not in live-fusion.cabal and is only included for completeness.
+
 {-# LANGUAGE ExtendedDefaultRules #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 
 import Data.Typeable
 
-import qualified DeBruijn
-import qualified HOAS
-import HOAS (con, lam, app)
-import Convert
+import qualified Data.LiveFusion.Scalar.DeBruijn as DeBruijn
+import qualified Data.LiveFusion.Scalar.HOAS as HOAS
+import Data.LiveFusion.Scalar.HOAS (con, lam, app)
+import Data.LiveFusion.Scalar.Convert
 
 i = HOAS.lam $ \x -> x
 

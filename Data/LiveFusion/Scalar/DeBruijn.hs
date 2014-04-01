@@ -1,6 +1,8 @@
+-- Copyright (c) [2013] Manuel M T Chakravarty.  All rights reserved.
+
 {-# LANGUAGE GADTs #-}
 
-module DeBruijn where
+module Data.LiveFusion.Scalar.DeBruijn where
 
 import Text.Show.Functions
 

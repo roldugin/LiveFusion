@@ -1,6 +1,8 @@
-{-# LANGUAGE GADTs, StandaloneDeriving, DeriveDataTypeable, NoMonomorphismRestriction #-}
+-- Copyright (c) [2013] Manuel M T Chakravarty.  All rights reserved.
 
-module HOAS where
+{-# LANGUAGE GADTs, StandaloneDeriving, DeriveDataTypeable, NoMonomorphismRestriction, CPP #-}
+
+module Data.LiveFusion.Scalar.HOAS where
 
 import Data.Typeable
 import Text.Show.Functions
@@ -25,7 +27,11 @@ data Term t where
   Lam :: (Typeable s, Typeable t, Show s, Show t) => (Term s -> Term t)      -> Term (s -> t)
   App :: (Typeable s, Typeable t, Show s, Show t) => Term (s -> t) -> Term s -> Term t
 
+#if __GLASGOW_HASKELL__ < 708
 deriving instance Typeable1 Term
+#else
+deriving instance Typeable Term
+#endif
 
 showTermOp :: Term t -> String
 showTermOp (Tag lvl) = "Tag " ++ show lvl

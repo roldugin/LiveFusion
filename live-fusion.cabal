@@ -20,10 +20,14 @@ Library
     Data.LiveFusion.HSBackend
     Data.LiveFusion.HSBackend.THDefinitions
     Data.LiveFusion.Types
+    Data.LiveFusion.Scalar.Convert
+    Data.LiveFusion.Scalar.DeBruijn
+    Data.LiveFusion.Scalar.HOAS
+    Data.LiveFusion.Scalar.Sharing
 
   Other-Modules:
 
   GHC-Options: -Odph
 
   Build-Depends:
-    base, containers, filepath, ghc-paths, ghc-prim, ghc >= 7.6, data-reify, vector, template-haskell, transformers, primitive
+    base, containers, filepath, ghc-paths, ghc-prim, ghc >= 7.6, data-reify, vector, template-haskell, transformers, primitive, hashtables, hashable

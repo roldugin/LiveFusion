@@ -1,6 +1,8 @@
-{-# LANGUAGE GADTs, ScopedTypeVariables #-}
+-- Copyright (c) [2013] Manuel M T Chakravarty.  All rights reserved.
 
-module Convert (convert, convertSharing) where
+{-# LANGUAGE GADTs, ScopedTypeVariables, PatternGuards #-}
+
+module Data.LiveFusion.Scalar.Convert (convert, convertSharing) where
 
   -- standard libraries
 import Data.List
@@ -8,9 +10,9 @@ import Data.Typeable
 import Data.Maybe
 
   -- friends
-import qualified DeBruijn
-import qualified HOAS
-import Sharing
+import qualified Data.LiveFusion.Scalar.DeBruijn as DeBruijn
+import qualified Data.LiveFusion.Scalar.HOAS as HOAS
+import Data.LiveFusion.Scalar.Sharing
 
 
 -- A layout of an environment an entry for each entry of the environment.

@@ -1,10 +1,14 @@
-{-# LANGUAGE GADTs, RankNTypes, ScopedTypeVariables #-}
+-- Copyright (c) [2013] Manuel M T Chakravarty.  All rights reserved.
 
-module Sharing where
+{-# LANGUAGE GADTs, RankNTypes, ScopedTypeVariables, PatternGuards #-}
+
+module Data.LiveFusion.Scalar.Sharing where
 
 import Control.Applicative
 import Control.Monad.Fix
-import Data.HashTable                           as Hash
+import Data.HashTable.IO                        as Hash
+import Data.Hashable
+import Data.Bits ( xor )
 import qualified Data.IntMap                    as IntMap
 import Debug.Trace
 import System.IO.Unsafe                         (unsafePerformIO)
@@ -13,8 +17,8 @@ import Data.Maybe
 import Data.Typeable
 import System.Mem.StableName
 
-import HOAS                                     (Level)
-import qualified HOAS as HOAS
+import Data.LiveFusion.Scalar.HOAS                                     (Level)
+import qualified Data.LiveFusion.Scalar.HOAS as HOAS
 
 
 -- Occurences maps
@@ -27,12 +31,16 @@ data StableTermName where
   StableTermName :: Typeable t => StableName (HOAS.Term t) -> StableTermName
 
 instance Show StableTermName where
-  show (StableTermName sn) = show $ hashStableName sn
+  show = show . hash
 
 instance Eq StableTermName where
   StableTermName sn1 == StableTermName sn2
     | Just sn1' <- gcast sn1 = sn1' == sn2
     | otherwise              = False
+
+instance Hashable StableTermName where
+  hash (StableTermName sn) = hashStableName sn
+  hashWithSalt salt x = error "StableTermName.hashWithSalt: not implemented"
 
 makeStableTerm :: HOAS.Term t -> IO (StableName (HOAS.Term t))
 makeStableTerm e = e `seq` makeStableName e
@@ -42,14 +50,13 @@ makeStableTerm e = e `seq` makeStableName e
 -- Mutable hashtable version of the occurrence map keyed on the stable names of terms. It associates
 -- each term node with an occurence count and the height of the AST.
 --
-type OccMapHash = Hash.HashTable StableTermName (Int, Int)
+type OccMapHash = Hash.BasicHashTable StableTermName (Int, Int)
 
 -- Create a new hash table keyed on AST nodes.
 --
 newOccMapHashTable :: IO OccMapHash
-newOccMapHashTable = Hash.new (==) hashStableTerm
-  where
-    hashStableTerm (StableTermName sn) = fromIntegral (hashStableName sn)
+newOccMapHashTable = Hash.new
+
 
 -- Enter one term node occurrence into an occurrence map.  Returns 'Just h' if this is a repeated
 -- occurence and the height of the repeatedly occuring term is 'h'.
@@ -64,7 +71,7 @@ enterOcc occMap sa height
       entry <- Hash.lookup occMap sa
       case entry of
         Nothing           -> Hash.insert occMap sa (1    , height)  >> return Nothing
-        Just (n, heightS) -> Hash.update occMap sa (n + 1, heightS) >> return (Just heightS)    
+        Just (n, heightS) -> Hash.insert occMap sa (n + 1, heightS) >> return (Just heightS)
 
 -- Immutable occurence map
 
@@ -82,7 +89,7 @@ freezeOccMap oc
       kvs <- map dropHeight <$> Hash.toList oc
       return . IntMap.fromList . map (\kvs -> (key (head kvs), kvs)). groupBy sameKey $ kvs
   where
-    key (StableTermName sn, _) = hashStableName sn
+    key (sa, _)                = hash sa
     sameKey kv1 kv2            = key kv1 == key kv2
     dropHeight (k, (cnt, _))   = (k, cnt)
 
@@ -90,8 +97,8 @@ freezeOccMap oc
 -- not exist in the map, return an occurence count of '1'.
 --
 lookupWithTermName :: OccMap -> StableTermName -> Int
-lookupWithTermName oc sa@(StableTermName sn) 
-  = fromMaybe 1 $ IntMap.lookup (hashStableName sn) oc >>= Prelude.lookup sa
+lookupWithTermName oc sa
+  = fromMaybe 1 $ IntMap.lookup (hash sa) oc >>= Prelude.lookup sa
 
 -- Look up the occurence map keyed by array computations using a sharing array computation.  If an
 -- the key does not exist in the map, return an occurence count of '1'.
