@@ -2,14 +2,27 @@
 module Data.LiveFusion.HSBackend where
 
 import Data.LiveFusion.HSBackend.THDefinitions
+import Data.LiveFusion.Backend
 
 import Language.Haskell.TH as TH
 import System.IO.Unsafe ( unsafePerformIO )
+import Control.Monad
 
-data Impl a = Impl 
-  {  hs :: a
+data Impl t = Impl
+  {  hs :: t
   ,  th :: Maybe (Q TH.Exp)
   }
+
+instance Code Impl where
+  getNative = hs
+
+applyImpl :: Impl (a -> b) -> Impl a -> Impl b
+applyImpl i1 i2 = Impl hs' th'
+  where
+    hs' = (hs i1) (hs i2)
+    -- Note that application currently only works if there is TH code
+    -- for both the function and the argument.
+    th' = liftM2 TH.appE (th i1) (th i2)
 
 
 instance Show (Impl a) where
@@ -24,6 +37,9 @@ nofuse_pureImpl f = (defaultImpl f)
 defaultImpl :: a -> Impl a
 defaultImpl f = Impl { hs = f, th = Nothing } 
 
+
+-------------------------------------------------------------------------------
+-- Prelude --------------------------------------------------------------------
 
 plusImpl, timesImpl, minusImpl :: Num a => Impl (a -> a -> a)
 plusImpl = Impl { hs = $plusTH, th = Just plusTH }

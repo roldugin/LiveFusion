@@ -1,4 +1,4 @@
-{-# LANGUAGE GADTs, PatternGuards #-}
+{-# LANGUAGE GADTs, PatternGuards, StandaloneDeriving #-}
 
 -- | Loop is an abstract representation of a loop computation.
 --   It can be used to generate loop code.
@@ -6,6 +6,7 @@
 module Data.LiveFusion.Loop where
 
 import Data.LiveFusion.Util
+import Data.LiveFusion.Types
 import Data.LiveFusion.AliasMap ( AliasMap )
 import qualified Data.LiveFusion.AliasMap as AMap
 
@@ -704,8 +705,12 @@ data Expr where
   App1   :: Var -> Var -> Expr
   App2   :: Var -> Var -> Var -> Expr
   App3   :: Var -> Var -> Var -> Var -> Expr
+  CodeE  :: Impl a -> Expr
   IntLit :: Int -> Expr
-  deriving ( Show, Eq )
+
+deriving instance Show Expr
+--deriving instance Eq Expr
+
 
 
 pprExpr :: Expr -> String

@@ -24,6 +24,7 @@ Library
     Data.LiveFusion.Scalar.DeBruijn
     Data.LiveFusion.Scalar.HOAS
     Data.LiveFusion.Scalar.Sharing
+    Data.LiveFusion.Backend
 
   Other-Modules:
 

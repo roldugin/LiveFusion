@@ -5,7 +5,9 @@ import Data.LiveFusion.Loop as Loop
 import Data.LiveFusion.Util
 import Data.LiveFusion.HsEvaluator
 import Data.LiveFusion.HsCodeGen -- only for testing
-import Data.LiveFusion.Types ( Elt, Exp )
+import Data.LiveFusion.Types
+import Data.LiveFusion.Scalar.HOAS as HOAS
+
 
 import qualified Data.Vector.Unboxed as V
 import Prelude hiding ( map, zip, filter, zipWith )
@@ -92,7 +94,7 @@ data AST e where
            -> ArrayAST a
 
   Scalar   :: Elt a
-           => Exp a
+           => Term a
            -> ScalarAST a
 
 
@@ -107,9 +109,12 @@ deriving instance Show (WrappedASG Unique)
 type ScalarASG a s = ASG a s
 type ArrayASG a s = ASG (V.Vector a) s
 
+
+--type Fun t = HOAS.Term t
 type family Fun a where
-  Fun (a -> b) = Exp a -> Fun b
-  Fun a = Exp a
+  Fun (a -> b) = HOAS.Term a -> HOAS.Term b
+  Fun a = HOAS.Term a
+
 
 -- | Abstract Semantic Graph is a directed acyclic graph derived from the AST
 --   of delayed collective array operations by:
@@ -155,7 +160,7 @@ data ASG e s where
             -> ArrayASG a s
 
   ScalarG   :: Elt a
-            => Exp a
+            => Term a
             -> ScalarASG a s
 
   Fold_sG   :: Elt a
@@ -172,6 +177,7 @@ data ASG e s where
 
 deriving instance Show s => Show (ASG e s)
 deriving instance Typeable ASG
+
 
 instance Typeable e => MuRef (AST e) where
   type DeRef (AST e) = WrappedASG
@@ -320,13 +326,15 @@ fuse env = fuse'
               -- BODY
               cVar      = eltVar uq
               fVar      = var "f" uq
+              -- >fBody     = CodeE (getImpl f)
+              -- >fBind     = bindStmt fVar fBody
               fApp      = App2 fVar aVar bVar
               cBind     = bindStmt cVar fApp
               bodyStmts = [cBind]
 
               -- LOOP
               loop      = setArrResultOnly uq
-                        -- >$ addArg fVar (toDyn f)
+                 -- >       $ addArg fVar (toDyn f)
                         $ addStmts bodyStmts (bodyLbl uq)
                         $ rebindIndexAndLengthVars uq arr_uq -- be careful: arbitrary choice between a and b
                         -- $ addDefaultControlFlow uq

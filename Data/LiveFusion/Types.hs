@@ -1,16 +1,21 @@
 {-# LANGUAGE MultiParamTypeClasses, GADTs, FlexibleContexts, StandaloneDeriving, TemplateHaskell, KindSignatures, RankNTypes #-}
-module Data.LiveFusion.Types where
+module Data.LiveFusion.Types
+  ( module Data.LiveFusion.Types
+	, module Data.LiveFusion.HSBackend
+  ) where
 
 import Data.LiveFusion.HSBackend
+import Data.LiveFusion.Scalar.HOAS
 
 import qualified Data.Vector.Unboxed as V
 import Data.Typeable
 import Data.Word
 import Data.Maybe
-import Control.Applicative
+--import Control.Applicative
 import qualified Language.Haskell.TH as TH
 import           Language.Haskell.TH ( Q )
 import Prelude as P
+import Text.Show.Functions
 
 
 class (Show a, V.Unbox a, Typeable a) => Elt a
@@ -24,124 +29,69 @@ instance (Elt a, Elt b) => Elt (a,b)
 instance (Elt a, Elt b, Elt c) => Elt (a,b,c)
 instance (Elt a, Elt b, Elt c, Elt d) => Elt (a,b,c,d)
 
--------------------------------------------------------------------------------
--- Functions ------------------------------------------------------------------
 
-instance Num a => Num (Exp a) where
-  (+) = plusExp
-  (*) = timesExp
-  (-) = minusExp
-
-  negate = negateExp
-
-  abs = absExp
-
-  signum = signumExp
-
-  fromInteger = fromIntegerExp
-
-data Exp a where
-  ConstE :: a -> Exp a
-  FunE   :: Impl a -> Exp a
-  AppE   :: Exp (a -> b) -> Exp a -> Exp b
+--data Exp t where
+--  ConstE :: t -> Exp t
+--  FunE   :: Impl t -> Exp t
+--  AppE   :: Exp (a -> b) -> Exp a -> Exp b
 
 
-instance Show (Exp a) where
-  show (ConstE x)  = "<>"
-  show (FunE impl) = show impl
-  show (AppE f x)  = show f ++ " " ++ show x
+--instance Show t => Show (Exp t) where
+--  show (ConstE t) = show t
+--  show (FunE impl) = show impl
+--  show (AppE f x) = show f ++ " <>"
 
 
-instance Functor Exp where
-  fmap f x = FunE (nofuse_pureImpl f) <*> x
-instance Applicative Exp where
-  pure a = FunE (nofuse_pureImpl a)
-  f <*> x = AppE f x
+--instance Functor Exp where
+--  fmap f x = FunE (nofuse_pureImpl f) <*> x
+--instance Applicative Exp where
+--  pure a = FunE (nofuse_pureImpl a)
+--  f <*> x = AppE f x
 
-plusExp, timesExp, minusExp :: Num a => Exp a -> Exp a -> Exp a
-plusExp x y = (FunE plusImpl) <*> x <*> y
-timesExp x y = (FunE timesImpl) <*> x <*> y
-minusExp x y = (FunE timesImpl) <*> x <*> y
+-- | A lot like Applicative's <*>
+--(<.>) :: Exp (a -> b) -> Exp a -> Exp b
+--f <.> x = AppE f x
 
-negateExp :: Num a => Exp a -> Exp a
-negateExp x = (FunE negateImpl) <*> x
 
-absExp :: Num a => Exp a -> Exp a
-absExp x = (FunE absImpl) <*> x
-
-signumExp :: Num a => Exp a -> Exp a
-signumExp x = (FunE signumImpl) <*> x
-
-fromIntegerExp :: Num a => Integer -> Exp a
-fromIntegerExp = ConstE . fromInteger
+--getImpl :: Exp a -> Impl a
+--getImpl (FunE impl) = impl
+--getImpl (AppE f x) = applyImpl (getImpl f) (getImpl x)
+--getImpl (ConstE x) = error "Constant expressions are not yet supported" -- TODO
 
 
 -------------------------------------------------------------------------------
--- AST ------------------------------------------------------------------------
+-- Prelude --------------------------------------------------------------------
 
-type ArrayAST a = AST (Data a)
+class (Num a, Typeable a, Show a) => IsNum a
 
-type ScalarAST a = AST a
+instance IsNum a => Num (Term a) where
+  (+) = plusTerm
+  (*) = timesTerm
+  (-) = minusTerm
 
-type Data a = [a]
+  negate = negateTerm
 
-data AST a where
-  Scal     :: a -> ScalarAST a
-  Manifest :: [a] -> ArrayAST a
-  Map      :: Exp (a -> b) -> ArrayAST a -> ArrayAST b
-  ZipWith  :: Exp (a -> b -> c) -> ArrayAST a -> ArrayAST b -> ArrayAST c
-  Fold     :: Exp (a -> b -> a) -> ScalarAST a -> ArrayAST b -> AST a
+  abs = absTerm
 
+  signum = signumTerm
 
--------------------------------------------------------------------------------
--- Frontend -------------------------------------------------------------------
+  fromInteger = fromIntegerTerm
 
--- User facing array type
-type Array a = ArrayAST a
+plusTerm, timesTerm, minusTerm :: IsNum a => Term a -> Term a -> Term a
+plusTerm x y = (code plusImpl) `app` x `app` y
+timesTerm x y = (code timesImpl) `app` x `app` y
+minusTerm x y = (code timesImpl) `app` x `app` y
 
-type Scalar a = ScalarAST a
+negateTerm :: IsNum a => Term a -> Term a
+negateTerm x = (code negateImpl) `app` x
 
+absTerm :: IsNum a => Term a -> Term a
+absTerm x = (code absImpl) `app` x
 
--- User combinator function
-map' :: Exp (a -> b) -> Array a -> Array b
-map' f arr = Map f arr
+signumTerm :: IsNum a => Term a -> Term a
+signumTerm x = (code signumImpl) `app` x
 
-zipWith' :: Exp (a -> b -> c) -> Array a -> Array b -> Array c
-zipWith' f arr brr = ZipWith f arr brr
+fromIntegerTerm :: IsNum a => Integer -> Term a
+fromIntegerTerm = con . fromInteger
 
-fold' :: Exp (a -> b -> a) -> Scalar a -> Array b -> Scalar a
-fold' f z arr = Fold f z arr
-
-use :: a -> Scalar a
-use = Scal
-
-ret :: Scalar a -> a
-ret = eval
-
-fromList' :: [a] -> Array a
-fromList' = Manifest
-
-toList' :: Array a -> [a]
-toList' = eval
-
-(!) :: Array a -> Int -> a
-arr ! i = (toList' arr) !! i
-
-
--------------------------------------------------------------------------------
--- Backend selection ----------------------------------------------------------
-
-eval :: AST a -> a
-eval = evalI
-
-
--------------------------------------------------------------------------------
--- Interpreter Backend --------------------------------------------------------
-
-evalI :: AST a -> a
-evalI (Scal x) = x
-evalI (Manifest xs) = xs
---evalI (Map f xs) = P.map (hs f) (eval xs)
---evalI (ZipWith f xs ys) = P.zipWith (hs f) (eval xs) (eval ys)
---evalI (Fold f z xs) = P.foldl (hs f) (eval z) (eval xs)
 
