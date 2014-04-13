@@ -5,6 +5,7 @@
 
 module Data.LiveFusion.Loop where
 
+import Data.LiveFusion.Backend
 import Data.LiveFusion.Util
 import Data.LiveFusion.Types
 import Data.LiveFusion.AliasMap ( AliasMap )
@@ -705,10 +706,12 @@ data Expr where
   App1   :: Var -> Var -> Expr
   App2   :: Var -> Var -> Var -> Expr
   App3   :: Var -> Var -> Var -> Var -> Expr
-  CodeE  :: Impl a -> Expr
+  CodeE  :: Code code => code t -> Expr
   IntLit :: Int -> Expr
 
-deriving instance Show Expr
+instance Show Expr where
+  show = pprExpr
+
 --deriving instance Eq Expr
 
 
@@ -723,6 +726,8 @@ pprExpr (App2 f x y)
 pprExpr (App3 f x y z)
   = pprVar f `space` pprVar x `space`
     pprVar y `space` pprVar z
+pprExpr (CodeE _)
+  = "<Code>" -- TODO: pprCode
 pprExpr (IntLit i)
   = show i
 

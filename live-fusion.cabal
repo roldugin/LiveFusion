@@ -11,20 +11,31 @@ Cabal-Version:       >=1.8
 
 Library
   Exposed-Modules:
+    -- Front end
     Data.LiveFusion.Combinators
+    Data.LiveFusion.Types
+
+    -- Loop language
     Data.LiveFusion.Loop
     Data.LiveFusion.Util
-    Data.LiveFusion.HsCodeGen
-    Data.LiveFusion.HsEvaluator
     Data.LiveFusion.AliasMap
-    Data.LiveFusion.HSBackend
-    Data.LiveFusion.HSBackend.THDefinitions
-    Data.LiveFusion.Types
+
+    -- Scalar language
     Data.LiveFusion.Scalar.Convert
     Data.LiveFusion.Scalar.DeBruijn
     Data.LiveFusion.Scalar.HOAS
     Data.LiveFusion.Scalar.Sharing
+
+    -- Abstract interface to the backends
     Data.LiveFusion.Backend
+
+    -- Haskell backend
+    Data.LiveFusion.HSBackend
+    Data.LiveFusion.HSBackend.Prelude
+    Data.LiveFusion.HSBackend.THDefinitions
+    Data.LiveFusion.HsCodeGen
+    Data.LiveFusion.HsEvaluator
+
 
   Other-Modules:
 

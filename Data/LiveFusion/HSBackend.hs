@@ -13,6 +13,12 @@ data Impl t = Impl
   ,  th :: Maybe (Q TH.Exp)
   }
 
+class (Code code) => (HsCode code) where
+  getTH :: code t -> Maybe (Q TH.Exp)
+
+instance HsCode Impl where
+  getTH = th
+
 instance Code Impl where
   getNative = hs
 
