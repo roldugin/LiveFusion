@@ -1,5 +1,6 @@
 {-# LANGUAGE TemplateHaskell #-}
-module Data.LiveFusion.HSBackend.THDefinitions where
+
+module Data.LiveFusion.HsBackend.THDefinitions where
 
 -- | The use of Exp is a little overloaded in this code base. In this module
 --   all references to Exp are TemplateHaskell expressions defined in

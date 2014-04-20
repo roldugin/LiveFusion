@@ -30,9 +30,9 @@ Library
     Data.LiveFusion.Backend
 
     -- Haskell backend
-    Data.LiveFusion.HSBackend
-    Data.LiveFusion.HSBackend.Prelude
-    Data.LiveFusion.HSBackend.THDefinitions
+    Data.LiveFusion.HsBackend
+    Data.LiveFusion.HsBackend.Prelude
+    Data.LiveFusion.HsBackend.THDefinitions
     Data.LiveFusion.HsCodeGen
     Data.LiveFusion.HsEvaluator
 

@@ -5,6 +5,7 @@
 module Data.LiveFusion.Scalar.HOAS where
 
 import Data.LiveFusion.Backend
+import Data.LiveFusion.HsBackend -- TODO: For now hardcode Haskell backend in. Abstract over any backend later.
 
 import Data.Typeable
 import Text.Show.Functions
@@ -26,7 +27,7 @@ data Term t where
   Tag :: Typeable t                                 => Level                   -> Term t    
 
   -- | Backend specific implementation of Term of type t
-  CodeT :: (Code code, Typeable t, Show t)          => code t                  -> Term t
+  CodeT :: (HsCode code, Typeable t, Show t)        => code t                  -> Term t
   Con   :: (Typeable t, Show t)                     => t                       -> Term t
   Lam   :: (Typeable s, Typeable t, Show s, Show t) => (Term s -> Term t)      -> Term (s -> t)
   App   :: (Typeable s, Typeable t, Show s, Show t) => Term (s -> t) -> Term s -> Term t

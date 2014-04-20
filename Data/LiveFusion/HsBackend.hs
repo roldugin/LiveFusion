@@ -1,7 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
-module Data.LiveFusion.HSBackend where
+module Data.LiveFusion.HsBackend where
 
-import Data.LiveFusion.HSBackend.THDefinitions
+import Data.LiveFusion.HsBackend.THDefinitions
 import Data.LiveFusion.Backend
 
 import Language.Haskell.TH as TH
