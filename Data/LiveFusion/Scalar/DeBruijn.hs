@@ -4,6 +4,11 @@
 
 module Data.LiveFusion.Scalar.DeBruijn where
 
+import Data.LiveFusion.Backend
+import Data.LiveFusion.HsBackend
+
+import System.IO.Unsafe
+
 import Text.Show.Functions
 
 import Data.Char
@@ -29,6 +34,8 @@ idxToInt (SuccIdx n) = idxToInt n + 1
 --
 data Term env t where
   Var :: Idx env t                       -> Term env t
+  CodeT :: (HsCode code, Show t)
+        => code t                        -> Term env t
   Con :: Show t
       => t                               -> Term env t
   Lam :: Term (env, s) t                 -> Term env (s -> t)
@@ -39,6 +46,7 @@ instance Show (Term env t) where
   show = showTerm
     where
       showTerm (Var ix)       = "#" ++ show ix
+      showTerm (CodeT c)      = "CodeT .."
       showTerm (Con c)        = show c
       showTerm (Lam body)     = "\\" ++ show body
       showTerm (App fun arg)  = showParen fun ++ " " ++ showParen arg
@@ -53,6 +61,7 @@ pprTerm = ppr (-1)
   where
     ppr :: Int -> Term env t -> String
     ppr lvl (Var ix)      = pprIdx lvl ix
+    ppr lvl (CodeT c)     = unsafePprHsCode c
     ppr lvl (Con c)       = show c
     ppr lvl (Lam body)    = "\\" ++ pprIdx (lvl + 1) ZeroIdx ++ ". " ++ ppr (lvl + 1) body
     ppr lvl (App fun arg) = pprParen lvl fun ++ " " ++ pprParen lvl arg
@@ -61,6 +70,7 @@ pprTerm = ppr (-1)
     
     pprParen :: Int -> Term  env t -> String
     pprParen lvl t@(Var {}) = ppr lvl t
+    pprParen lvl t@(CodeT {}) = ppr lvl t
     pprParen lvl t@(Con {}) = ppr lvl t
     pprParen lvl t          = "(" ++ ppr lvl t ++ ")"
     
@@ -87,6 +97,7 @@ prj (SuccIdx idx) (Push val _) = prj idx val
 --
 intp :: Term env t -> Val env -> t
 intp (Var ix)       val = prj ix val
+intp (CodeT c)      val = getNative c
 intp (Con v)        val = v
 intp (Lam body)     val = intp body . (val `Push`)
 intp (App fun arg)  val = (intp fun val) (intp arg val)

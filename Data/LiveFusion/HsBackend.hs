@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TemplateHaskell, ViewPatterns #-}
 module Data.LiveFusion.HsBackend where
 
 import Data.LiveFusion.HsBackend.THDefinitions
@@ -15,6 +15,13 @@ data Impl t = Impl
 
 class (Code code) => (HsCode code) where
   getTH :: code t -> Maybe (Q TH.Exp)
+
+
+unsafePprHsCode :: HsCode code => code t -> String
+unsafePprHsCode (getTH -> Just qexp) = TH.pprint $ unsafePerformIO $ runQ qexp
+unsafePprHsCode (getTH -> Nothing)   = "undefined"
+{-# NOINLINE unsafePprHsCode #-}
+
 
 instance HsCode Impl where
   getTH = th

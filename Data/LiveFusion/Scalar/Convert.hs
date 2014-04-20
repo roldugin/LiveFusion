@@ -58,6 +58,7 @@ convert = cvt EmptyLayout
   where
     cvt :: Layout env env -> HOAS.Term t -> DeBruijn.Term env t
     cvt lyt (HOAS.Tag sz)      = DeBruijn.Var (prjIdx "'Tag' in vanilla convert" (size lyt - sz - 1) lyt)
+    cvt lyt (HOAS.CodeT c)     = DeBruijn.CodeT c
     cvt lyt (HOAS.Con v)       = DeBruijn.Con v
     cvt lyt (HOAS.Lam f)       = DeBruijn.Lam (cvt lyt' (f tag))
       where
@@ -88,6 +89,8 @@ convertSharing = cvt EmptyLayout [] . recoverSharing
         DeBruijn.Let (cvt lyt env boundTerm) (cvt lyt' (st:env) bodyTerm)
     cvt lyt env (TermSharing _ (Tag lvl)) 
       = DeBruijn.Var (prjIdx ("de Bruijn conversion tag " ++ show lvl) lvl lyt)
+    cvt lyt env (TermSharing _ (CodeT c))
+      = DeBruijn.CodeT c
     cvt lyt env (TermSharing _ (Con v))
       = DeBruijn.Con v
     cvt lyt env (TermSharing _ (Lam sts f))

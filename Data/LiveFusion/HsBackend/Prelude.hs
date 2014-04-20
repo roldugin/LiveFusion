@@ -9,6 +9,10 @@ import Data.Typeable
 -- | Shorthand class for `Num` which can be used in `HOAS.Term` tree.
 class (Num a, Typeable a, Show a) => IsNum a
 
+instance IsNum Int
+instance IsNum Float
+instance IsNum Double
+
 instance IsNum a => Num (Term a) where
   (+) = plusTerm
   (*) = timesTerm

@@ -20,6 +20,7 @@ import System.Mem.StableName
 import Data.LiveFusion.Scalar.HOAS                                     (Level)
 import qualified Data.LiveFusion.Scalar.HOAS as HOAS
 
+import Data.LiveFusion.HsBackend
 
 -- Occurences maps
 -- ---------------
@@ -120,6 +121,8 @@ data Term binder t where
   Tag :: Typeable t                               
       => Level                                                -> Term binder t    
 
+  CodeT :: (HsCode code, Typeable t, Show t)
+        => code t                                             -> Term binder t
   Con :: (Typeable t, Show t)                     
       => t                                                    -> Term binder t
   Lam :: (Typeable s, Typeable t, Show s, Show t) 
@@ -129,6 +132,7 @@ data Term binder t where
 
 showTermOp :: Term binder t -> String
 showTermOp (Tag lvl) = "Tag " ++ show lvl
+showTermOp (CodeT code) = "CodeT " ++ "..."
 showTermOp (Con v)   = "Con " ++ show v
 showTermOp (Lam {})  = "Lam"
 showTermOp (App {})  = "App"
@@ -299,6 +303,7 @@ makeOccMap lvl rootTerm
 
         ; case term of
             HOAS.Tag i   -> reconstruct $ return (Tag i, 0)           -- height is 0!
+            HOAS.CodeT c -> reconstruct $ return (CodeT c, 1)
             HOAS.Con v   -> reconstruct $ return (Con v, 1)
             HOAS.Lam f   -> reconstruct $ do
                             {   -- see Note [Traversing functions and side effects]
@@ -390,6 +395,7 @@ determineScopes occMap rootTerm
     scopes (TermSharing sn pterm)
       = case pterm of
           Tag i     -> reconstruct (Tag i) noNodeCounts
+          CodeT c   -> reconstruct (CodeT c) noNodeCounts
           Con v     -> reconstruct (Con v) noNodeCounts
           Lam lvl f -> let
                          (f', count)         = scopes f
