@@ -1,4 +1,6 @@
-{-# LANGUAGE GADTs, OverloadedStrings, ScopedTypeVariables, TypeFamilies, RankNTypes, FlexibleInstances, StandaloneDeriving, DeriveDataTypeable, FlexibleContexts, NoMonomorphismRestriction, TypeOperators, NamedFieldPuns #-}
+{-# LANGUAGE GADTs, OverloadedStrings, ScopedTypeVariables, TypeFamilies, RankNTypes,
+             FlexibleInstances, StandaloneDeriving, DeriveDataTypeable, FlexibleContexts,
+             NoMonomorphismRestriction, TypeOperators, NamedFieldPuns #-}
 module Data.LiveFusion.Combinators where
 
 import Data.LiveFusion.Loop as Loop
@@ -295,11 +297,18 @@ fuse env = fuse'
               aVar      = eltVar arr_uq         -- element of source array
 
               -- BODY
+
+              -- Binding for `f`
               fVar      = var "f" uq            -- name of function to apply
-              fApp      = App1 fVar aVar        -- function application
+              fBody     = FunE (lam f)          -- f's body in HOAS representation
+              fBind     = bindStmt fVar fBody   -- f = <HOAS.Term>
+
+              -- Binding for result element `b`
               bVar      = eltVar uq             -- resulting element variable
+              fApp      = App1 fVar aVar        -- function application
               bBind     = bindStmt bVar fApp    -- bind result
-              bodyStmts = [bBind]               -- body block is just assignment
+
+              bodyStmts = [fBind, bBind]        -- body block is just assignment
 
               -- LOOP
               loop      = setArrResultOnly uq

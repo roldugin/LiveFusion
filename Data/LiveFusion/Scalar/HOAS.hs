@@ -55,6 +55,13 @@ con = Con
 lam = Lam
 app = App
 
+-- Additional helper constructors
+--
+lam2 f = lam $ \x -> lam $ \y -> f x y
+lam3 f = lam $ \x -> lam $ \y -> lam $ \z -> f x y z
+lam4 f = lam $ \x -> lam $ \y -> lam $ \z -> lam $ \w -> f x y z w
+
+
 -- A term interpreter for closed terms
 --
 intp :: Show t => Term t -> t
