@@ -35,7 +35,9 @@ minusTH = [| (-) |]
 negateTH = [| negate |]
 absTH = [| abs |]
 signumTH = [| signum |]
-{- skip fromIntegral -}
+
+fromIntegerTH :: Q Exp
+fromIntegerTH = [| fromInteger |]
 
 -------------------------------------------------------------------------------
 -- class (Enum a)

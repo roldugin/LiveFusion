@@ -6,10 +6,12 @@ module Data.LiveFusion.Combinators where
 import Data.LiveFusion.Loop as Loop
 import Data.LiveFusion.Util
 import Data.LiveFusion.HsEvaluator
-import Data.LiveFusion.HsCodeGen -- only for testing
 import Data.LiveFusion.Types
 import Data.LiveFusion.Scalar.HOAS as HOAS
 
+-- For testing
+import Data.LiveFusion.HsBackend.Prelude
+import Data.LiveFusion.HsCodeGen
 
 import qualified Data.Vector.Unboxed as V
 import Prelude hiding ( map, zip, filter, zipWith )
@@ -308,7 +310,7 @@ fuse env = fuse'
               fApp      = App1 fVar aVar        -- function application
               bBind     = bindStmt bVar fApp    -- bind result
 
-              bodyStmts = [fBind, bBind]        -- body block is just assignment
+              bodyStmts = [fBind, bBind]        -- body block has two statements
 
               -- LOOP
               loop      = setArrResultOnly uq
@@ -447,19 +449,6 @@ rebindIndexAndLengthVars nu old = rebindLengthVar nu old
                                 . rebindIndexVar nu old
 
 
-{-
-puginCode :: Typeable e => AST e -> String -> String -> IO (String, [Arg])
-pluginCode AST moduleName entryFnName = do
-  (env, rootUq, Just rootNode) <- recoverSharing AST
-  let (loop, resultVar) = fuse env rootNode rootUq
-      (bodyCode, args) = pluginEntryCode entryFnName (typeOf $ resultType AST) resultVar loop
-      code = preamble moduleName ++\ bodyCode
-  return (code, args)
-
-
-justCode :: Typeable e => AST e -> IO ()
-justCode AST = putStrLn =<< indexed <$> fst <$> pluginCode AST "Plugin" "pluginEntry"
--}
 fuseToLoop :: Typeable e => AST e -> IO Loop
 fuseToLoop ast = do
   (env, rootUq, Just rootNode) <- recoverSharing ast
@@ -519,15 +508,25 @@ getLoop = postprocessLoop . unsafePerformIO . fuseToLoop
 -------------- Tests -------------------------
 fl = Data.LiveFusion.Combinators.fromList
 
+justIndexedCode :: Typeable e => AST e -> IO ()
+justIndexedCode = putStrLn . indexed . defaultPluginCode . getLoop
+
+justCode :: (Typeable a, Elt a) => ArrayAST a -> IO ()
+justCode = putStrLn . defaultPluginCode . getLoop
 
 --example0 :: ArrayAST Int
 --example0 = ZipWith (+)
 --       (fl [1,2,3])
 --      $ Scan (+) 0 $ Filter (const True) $ Map (+1) $ fl [4,5,6]
 
-
 --test0 :: IO ()
 --test0 = print $ eval example0
+
+example1 :: ArrayAST Int
+example1 = Map (+1) (fl [1,2,3])
+
+test1 :: IO ()
+test1 = print $ eval example1
 
 {-
 runTests = do

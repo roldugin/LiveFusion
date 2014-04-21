@@ -41,4 +41,5 @@ signumTerm :: IsNum a => Term a -> Term a
 signumTerm x = (code signumImpl) `app` x
 
 fromIntegerTerm :: IsNum a => Integer -> Term a
-fromIntegerTerm = con . fromInteger
+fromIntegerTerm = code . fromIntegerImpl
+--fromIntegerTerm = con . fromInteger

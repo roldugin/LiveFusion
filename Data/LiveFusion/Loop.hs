@@ -510,6 +510,7 @@ varsE (VarE v) = [v]
 varsE (App1 f v) = [f, v]
 varsE (App2 f v1 v2) = [f, v1, v2]
 varsE (App3 f v1 v2 v3) = [f, v1, v2, v3]
+varsE (FunE _) = [] -- DeBruijn Terms are closed
 varsE (IntLit _) = []
 
 
@@ -690,6 +691,7 @@ appendLoopBlockMap :: Block -> Block -> Block
 appendLoopBlockMap (Block stmts1 final1) (Block stmts2 final2)
   = Block (stmts1 ++ stmts2) (final1 <|> final2)
 
+
 -- | Represents an expression in the loop.
 --
 --   NOTE: It would be difficult to type the expression tree as `Expr a'
@@ -702,18 +704,23 @@ appendLoopBlockMap (Block stmts1 final1) (Block stmts2 final2)
 --
 --   2. Alternatively we could minimise the use of data structures such as lists
 --   and maps and instead keep more stuff in the tree itself.
+--
+--   3. Now that we have DeBruijn term language that we use for scalar
+--      functions specified by the user, perhaps we do not need a separate Expr
+--      language.
+--
 data Expr where
-  VarE   :: Var -> Expr
-  App1   :: Var -> Var -> Expr
-  App2   :: Var -> Var -> Var -> Expr
-  App3   :: Var -> Var -> Var -> Var -> Expr
-  FunE   :: HOAS.Term t -> Expr
-  IntLit :: Int -> Expr
+  VarE   :: Var                              -> Expr
+  App1   :: Var -> Var                       -> Expr
+  App2   :: Var -> Var -> Var                -> Expr
+  App3   :: Var -> Var -> Var -> Var         -> Expr
+  FunE   :: (Typeable t) => HOAS.Term t      -> Expr
+  IntLit :: Int                              -> Expr
 
 instance Show Expr where
   show = pprExpr
 
---deriving instance Eq Expr
+--deleteriving instance Eq Expr
 
 
 

@@ -63,3 +63,6 @@ negateImpl, absImpl, signumImpl :: Num a => Impl (a -> a)
 negateImpl = Impl $negateTH (Just negateTH)
 absImpl = Impl $absTH (Just absTH)
 signumImpl = Impl $signumTH (Just signumTH)
+
+fromIntegerImpl :: Num a => Integer -> Impl a
+fromIntegerImpl n = Impl (($fromIntegerTH) n) (Just [| $fromIntegerTH n |])

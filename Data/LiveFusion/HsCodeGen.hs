@@ -1,8 +1,14 @@
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TemplateHaskell, GADTs #-}
 
 -- Source Haskell code generator.
 
 module Data.LiveFusion.HsCodeGen where
+
+import Data.LiveFusion.HsBackend
+
+import qualified Data.LiveFusion.Scalar.HOAS as HOAS
+import Data.LiveFusion.Scalar.DeBruijn as DeBruijn
+import Data.LiveFusion.Scalar.Convert as DeBruijn
 
 import Data.LiveFusion.Util
 import Data.LiveFusion.Loop as Lp
@@ -17,6 +23,7 @@ import Data.Functor.Identity
 import System.IO.Unsafe ( unsafePerformIO )
 import Control.Arrow ( first )
 import Data.Maybe
+import Data.Char
 
 -- Modules required for code generation
 import qualified Data.Vector.Unboxed as V
@@ -30,7 +37,7 @@ import Data.Dynamic
 --
 --   TODO: Perhaps passing the whole environment is not the best approach.
 --   TODO: KNOWN ISSUE Updated variable cannot be used in the same block.
-cgBlock :: VarMap -> Label -> Block -> Dec
+cgBlock :: VarMap -> Label -> Block -> TH.Dec
 cgBlock emap lbl blk@(Block stmts final) = blockFun
   where
     blockFun = FunD (cgLabelName lbl) [Clause pats fnBody []]
@@ -45,6 +52,7 @@ cgBlock emap lbl blk@(Block stmts final) = blockFun
                                       (cgStmts rest)   -- statements following the guard
           _             -> (cgStmt emap dirtyVars stmt) : (cgStmts rest)
     cgStmts [] = []
+
 
     blockArgs = emap ! lbl
 
@@ -146,7 +154,8 @@ applyMany1 exps = foldl1 TH.AppE exps
 applyMany :: TH.Exp -> [TH.Exp] -> TH.Exp
 applyMany fun exps = applyMany1 (fun : exps)
 
--- | Turn a Loop cgExpession to a TH cgExpession.
+
+-- | Turn a Loop Language Expession to a TH Expression.
 --
 cgExp :: Lp.Expr -> TH.Exp
 cgExp (Lp.VarE v)
@@ -170,8 +179,55 @@ cgExp (Lp.App3 f v1 v2 v3)
         th_v3 = cgVar v3
     in  TH.AppE (TH.AppE (TH.AppE th_f th_v1) th_v2) th_v3
 
+cgExp (Lp.FunE term)
+  = cgHOAS term
+
 cgExp (Lp.IntLit i)
   = TH.LitE $ TH.IntegerL $ toInteger i
+
+
+cgHOAS :: (Typeable t) => HOAS.Term t -> TH.Exp
+cgHOAS = cgDeBruijn . convertSharing
+
+
+-- This uses unsafePerformIO because the rest of code generation happens
+-- outside of Q monad. This is probably not a great idea, so it will have
+-- to be rewritten soon (or never :))
+cgDeBruijn :: Typeable t => DeBruijn.Term env t -> TH.Exp
+cgDeBruijn = cg (-1)
+  where
+    cg :: Int -> DeBruijn.Term env t -> TH.Exp
+    {-# NOINLINE cg #-}
+    cg lvl (Var ix)
+      = TH.VarE $ thName lvl ix
+
+    cg lvl (CodeT code)
+      = unsafePerformIO $ runQ $ fromMaybe err (getTH code)
+      where err = error "cgDeBruijn: No TH implementation provided"
+
+    cg lvl (Con c)
+      = error "cgDeBruijn: Con unsupported"
+
+    cg lvl (Lam body)
+      = TH.LamE [TH.VarP (thName (lvl + 1) ZeroIdx)] (cg (lvl + 1) body)
+
+    cg lvl (App fun arg)
+      = TH.AppE (cg lvl fun) (cg lvl arg)
+
+    cg lvl (Let bnd body)
+      = error "cgDeBruijn: Let binding unsupported"
+
+    thName :: Int -> Idx env t -> TH.Name
+    thName lvl ix = TH.mkName $ pprIdx lvl ix
+
+    pprIdx :: Int -> Idx env t -> String
+    pprIdx lvl idx
+      | n < 26    = [chr (ord 'a' + n)]
+      | otherwise = 'v':show n
+      where
+        n = lvl - idxToInt idx
+
+
 
 
 -- | Perhaps one day we will support Exprs in more places.
