@@ -38,11 +38,12 @@ import Data.Dynamic
 --   TODO: Perhaps passing the whole environment is not the best approach.
 --   TODO: KNOWN ISSUE Updated variable cannot be used in the same block.
 cgBlock :: VarMap -> Label -> Block -> TH.Dec
-cgBlock emap lbl blk@(Block stmts final) = blockFun
+cgBlock emap lbl blk = blockFun
   where
+    -- A function representing a block of statements in the loop, e.g. body_1 ... = do { ... }
     blockFun = FunD (cgLabelName lbl) [Clause pats fnBody []]
     pats = map (BangP . VarP . cgVarName) blockArgs
-    fnBody = NormalB $ DoE (cgStmts stmts)
+    fnBody = NormalB $ DoE (cgStmts $ blockStmts blk)
 
     cgStmts (stmt:rest)
       = case stmt of
@@ -243,65 +244,112 @@ cgDirtyVarName :: Lp.Var -> TH.Name
 cgDirtyVarName = TH.mkName . (++ "'") . Lp.pprVar
 
 
-defaultPluginCode :: Loop -> String
+defaultPluginCode :: Loop -> TypeRep -> String
 defaultPluginCode = pluginCode "Plugin" "entry"
 
 
-pluginCode :: String -> String -> Loop -> String
-pluginCode moduleName entryFnName loop
-  = preamble moduleName              ++\
-    pluginEntryCode entryFnName loop ++\
+pluginCode :: String -> String -> Loop -> TypeRep -> String
+pluginCode moduleName entryFnName loop resultTy
+  = preamble moduleName                       ++\
+    pluginEntryCode entryFnName loop resultTy ++\
     loopCode loop
 
 
-pluginEntryCode :: String -> Loop -> String
-pluginEntryCode entryFnName loop
-  = pprint [fnSig, fnDefn]
+pluginEntryCode :: String -> Loop -> TypeRep -> String
+pluginEntryCode entryFnName loop resultTy
+  = pprint
+  $ pluginEntryCodeTH entryFnName loop resultTy
+
+
+pluginEntryCodeTH :: String -> Loop -> TypeRep -> [TH.Dec]
+pluginEntryCodeTH entryFnName loop resultTy
+  = [dyntyEntrySig, dyntyEntryDec, tyEntrySig, tyEntryDec]
   where
-    fnSig     = SigD fnName fnTy
-    fnDefn    = FunD fnName [Clause [argList] (NormalB loopCall) []]
+    -- Make dynamically typed entry into the plugin like entry_Plugin1234 :: [Dynamic] -> Dynamic
+    dyntyEntrySig  = SigD dyntyEntryName dyntyEntryTy
+    dyntyEntryDec  = FunD dyntyEntryName [Clause [argList] (NormalB tyEntryCall) []]
 
-    fnName    = mkName entryFnName         -- E.g. entry_
+    dyntyEntryName = mkName entryFnName     -- E.g. entry_Plugin1234
 
-    fnTy      = dynListTy `to` dynTy       -- [Dynamic] -> Dynamic
+    dyntyEntryTy   = dynListTy `to` dynTy   -- [Dynamic] -> Dynamic
 
-    dynTy     = ConT $ mkName "Dynamic"    -- [Dynamic]
-    dynListTy = AppT ListT dynTy           -- Dynamic
+    dynTy          = ConT $ mkName "Dynamic"    -- [Dynamic]
+    dynListTy      = AppT ListT dynTy           -- Dynamic
+
+    -- [!f1, !f2, !arr1, ...]
+    argList        = ListP argPats
+    argPats        = map (BangP . VarP . cgVarName) argVars
+
+    -- toDyn (entry (fd f1) (fd f2) (fd arr1) ... )
+    tyEntryCall    = toDynamicE
+                   $ applyMany (TH.VarE tyEntryName)
+                   $ map (coerceArgE . TH.VarE . cgVarName) argVars
+
+
+    -- Make statically typed entry into the plugin like entry :: Vector Double -> Vector Int -> Vector Double
+    tyEntrySig     = SigD tyEntryName tyEntryTy
+    tyEntryDec     = FunD tyEntryName [Clause argPats (NormalB loopCall) []]
+
+    tyEntryTy      = foldr to (thTypeRepTy resultTy)
+                   $ map (thTypeRepTy . dynTypeRep) argVals
+
+    loopCall       = runSTE
+                   $ applyMany loopEntry
+                   $ map (TH.VarE . cgVarName) argVars
 
     -- | Makes a type for (ty1 -> ty2)
     to :: Type -> Type -> Type
     ty1 `to` ty2 = AppT (AppT ArrowT ty1) ty2
 
-    -- [!f1, !f2, !arr1, ...]
-    argList   = ListP
-              $ map (BangP . VarP . cgVarName) argVars
-
-    -- (fd f1) (fd f2) (fd arr1) ...
-    loopCall  = toDynamic
-              $ applyMany loopEntry
-              $ map (coerceArg . TH.VarE . cgVarName) argVars
-
     -- Applies the arg to fd function (fromDynamic, expected to be in scope)
-    coerceArg = AppE (TH.VarE $ mkName "fd")
+    coerceArgE = AppE (TH.VarE $ mkName "fd")
 
-    toDynamic = AppE (TH.VarE $ mkName "toDyn")
+    toDynamicE = AppE (TH.VarE $ mkName "toDyn")
+
+    runSTE     = AppE (TH.VarE $ mkName "runST")
+
+    -- E.g. run
+    tyEntryName   = TH.mkName "run"
 
     -- E.g. init_
     loopEntry = TH.VarE $ cgLabelName $ unsafeLoopEntry loop
 
-    argVars   = Map.keys $ loopArgs loop
+    argVars   = Map.keys  $ loopArgs loop
+    argVals   = Map.elems $ loopArgs loop
 
 
+thTypeOf :: Typeable a => a -> TH.Type
+thTypeOf = thTypeRepTy . typeOf
 
-loopCode :: Loop -> String
-loopCode loop = pprint
-              $ map codeGenBlock allBlocks
+
+-- | Convert TypeRep representation to TemplateHaskell's Type
+--
+-- It may or may not work with function, tuples and list types.
+-- However it will convert Int, Vector Int and Vector (Vector Double).
+thTypeRepTy :: TypeRep -> TH.Type
+thTypeRepTy rep 
+  = foldl AppT
+          (tyConType tyCon) 
+  $ map thTypeRepTy tyArgs
+  where
+    (tyCon, tyArgs) = splitTyConApp rep
+
+    tyConType :: TyCon -> TH.Type
+    tyConType = ConT . TH.mkName . show
+
+
+loopDecs :: Loop -> [TH.Dec]
+loopDecs loop = map codeGenBlock allBlocks
   where
     codeGenBlock (lbl,blk) = cgBlock extEnv lbl blk
 
     allBlocks = map (first theOneLabel) (AMap.assocs $ loopBlockMap loop)
 
     extEnv    = extendedEnv loop -- Environment after variable and goto analyses
+
+
+loopCode :: Loop -> String
+loopCode = pprint . loopDecs
 
 
 --------------------------------------------------------------------------------
@@ -317,6 +365,7 @@ preamble moduleName =
   "import Unsafe.Coerce                                                    " ++\
   "import Data.Dynamic                                                     " ++\
   "import GHC.Prim (Any)                                                   " ++\
+  "import GHC.Num                                                          " ++\
   "import Control.Monad.ST                                                 " ++\
   "import Control.Monad.Primitive                                          " ++\
   "                                                                        " ++\

@@ -27,15 +27,17 @@ import Data.LiveFusion.HsCodeGen
 defaultEntryFunctionName :: String
 defaultEntryFunctionName = "entry_"
 
-evalLoop :: Loop -> Dynamic
-evalLoop = unsafePerformIO . evalLoopIO
+-- | The loop language is currently untyped so TypeRep argument is the type of the result.
+evalLoop :: Loop -> TypeRep -> Dynamic
+evalLoop loop = unsafePerformIO . evalLoopIO loop
 {-# NOINLINE evalLoop #-}
 
-evalLoopIO :: Loop -> IO Dynamic
-evalLoopIO loop = do
+-- | The loop language is currently untyped so TypeRep argumer is the type of the result.
+evalLoopIO :: Loop -> TypeRep -> IO Dynamic
+evalLoopIO loop resultTy = do
   (pluginPath, h, moduleName) <- openTempModuleFile
   let entryFnName  = defaultEntryFunctionName ++ moduleName
-  let codeString   = pluginCode moduleName entryFnName loop
+  let codeString   = pluginCode moduleName entryFnName loop resultTy
   dump codeString h
   pluginEntry <- compileAndLoad pluginPath moduleName entryFnName
   let args    = Map.elems $ loopArgs loop
@@ -56,7 +58,8 @@ compileAndLoad hsFilePath moduleName entryFnName =
     defaultErrorHandler defaultFatalMessager defaultFlushOut $ do
       runGhc (Just libdir) $ do
         dflags <- getSessionDynFlags
-        setSessionDynFlags dflags
+        let dflags' = gopt_set dflags Opt_BuildDynamicToo
+        setSessionDynFlags dflags'
         target <- guessTarget hsFilePath Nothing
         setTargets [target]
         r <- load LoadAllTargets

@@ -1,6 +1,6 @@
 {-# LANGUAGE GADTs, OverloadedStrings, ScopedTypeVariables, TypeFamilies, RankNTypes,
              FlexibleInstances, StandaloneDeriving, DeriveDataTypeable, FlexibleContexts,
-             NoMonomorphismRestriction, TypeOperators, NamedFieldPuns #-}
+             NoMonomorphismRestriction, TypeOperators, NamedFieldPuns, LambdaCase, ExplicitForAll #-}
 module Data.LiveFusion.Combinators where
 
 import Data.LiveFusion.Loop as Loop
@@ -438,9 +438,12 @@ rebindLengthVar :: Unique -> Unique -> Loop -> Loop
 rebindLengthVar nu old = addStmt stmt (initLbl nu)
   where stmt = bindStmt (lengthVar nu) (VarE $ lengthVar old)
 
-
+-- | Sets the index of a combinator to be the same as that of
+--   the previous combinator in a pipeline.
+--   
+--   Since the index is likely to change it updates it in the guard.
 rebindIndexVar :: Unique -> Unique -> Loop -> Loop
-rebindIndexVar nu old = addStmt stmt (initLbl nu)
+rebindIndexVar nu old = addStmt stmt (guardLbl nu)
   where stmt = bindStmt (indexVar nu) (VarE $ indexVar old)
 
 
@@ -497,7 +500,7 @@ evalAST :: Typeable a => AST a -> a
 evalAST ast = result
   where
     loop = getLoop ast
-    dynResult = evalLoop loop
+    dynResult = evalLoop loop (typeOf result)
     result = fromJust $ fromDynamic dynResult
 {-# NOINLINE evalAST #-}
 
@@ -508,11 +511,25 @@ getLoop = postprocessLoop . unsafePerformIO . fuseToLoop
 -------------- Tests -------------------------
 fl = Data.LiveFusion.Combinators.fromList
 
-justIndexedCode :: Typeable e => AST e -> IO ()
-justIndexedCode = putStrLn . indexed . defaultPluginCode . getLoop
 
-justCode :: (Typeable a, Elt a) => ArrayAST a -> IO ()
-justCode = putStrLn . defaultPluginCode . getLoop
+-- | Prints code for an AST with line numbers to stdout.
+justIndexedCode :: Typeable e => AST e -> IO ()
+justIndexedCode ast = putStrLn $ indexed $ defaultPluginCode (getLoop ast) (tyArgTy ast)
+
+
+-- | Prints code for an AST to stdout.
+justCode :: Typeable e => AST e -> IO ()
+justCode ast = putStrLn $ defaultPluginCode (getLoop ast) (tyArgTy ast)
+
+
+-- | Gets TypeRep of a type arguments.
+--
+-- Example:
+-- > tyArgTy (AST (Vector Int))
+-- Vector Int
+tyArgTy :: forall t a . Typeable a => t a -> TypeRep
+tyArgTy _ = typeOf (undefined :: a)
+
 
 --example0 :: ArrayAST Int
 --example0 = ZipWith (+)
@@ -523,10 +540,17 @@ justCode = putStrLn . defaultPluginCode . getLoop
 --test0 = print $ eval example0
 
 example1 :: ArrayAST Int
-example1 = Map (+1) (fl [1,2,3])
+example1 = Map (+1) $ Map (*2) (fl [1,2,3])
 
 test1 :: IO ()
 test1 = print $ eval example1
+
+--example2 :: ArrayAST Int
+--example2 = ZipWith (*) (Map (+1) $ fl [1,2,3,4,5,6,7,8]) (ZipWith (+) (fl $ take 20 [-8,-7..]) (Map (\x->x*2+1) $ fl [1..8]))
+
+--test2 :: IO ()
+--test2 = print $ eval example2
+
 
 {-
 runTests = do
