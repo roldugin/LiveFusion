@@ -5,12 +5,14 @@
 module Data.LiveFusion.HsCodeGen where
 
 import Data.LiveFusion.HsBackend
+import Data.LiveFusion.HsBackend.Types
 
 import qualified Data.LiveFusion.Scalar.HOAS as HOAS
 import Data.LiveFusion.Scalar.DeBruijn as DeBruijn
 import Data.LiveFusion.Scalar.Convert as DeBruijn
 
 import Data.LiveFusion.Util
+import Data.LiveFusion.Types
 import Data.LiveFusion.Loop as Lp
 import qualified Data.LiveFusion.AliasMap as AMap
 
@@ -64,15 +66,15 @@ cgBlock emap lbl blk = blockFun
 cgLabelName :: Label -> TH.Name
 cgLabelName = mkName . pprLabel
 
--- | Guard is a little tricky because we have queue up the statement after
---   the the block into one of the branches.
+-- | Guard is a little tricky because we have to queue up the statement after
+--   the statement into one of the branches.
 --
 --   TODO: If creating new blocks was easier in our framework, we could potentially
 --   generate a whole new block for the rest of the statements and generalise the Guard
 --   to a Case expression.
-cgGuardStmt :: VarMap -> [Var] -> Var -> Label -> [TH.Stmt] -> TH.Stmt
-cgGuardStmt emap dirtyVars pred onFailLbl followingStmts
-  = let thPredExp = cgExp (Lp.VarE pred)
+cgGuardStmt :: VarMap -> [Var] -> Expr -> Label -> [TH.Stmt] -> TH.Stmt
+cgGuardStmt emap dirtyVars predE onFailLbl followingStmts
+  = let thPredExp = cgExp predE
         thcgGotoExpExp = cgGotoExp emap dirtyVars onFailLbl
         thOKExp   = DoE followingStmts
         thStmt    = NoBindS $ TH.CondE thPredExp thOKExp thcgGotoExpExp
@@ -93,8 +95,8 @@ cgStmt _ _ (Assign v e)
         thStmt = LetS [ValD thVar (NormalB thExp) [{-no where clause-}]]
     in  thStmt
 
-cgStmt emap dirtyVars (Case pred tLbl fLbl)
-  = let thPredExp = cgExp (Lp.VarE pred)
+cgStmt emap dirtyVars (Case predE tLbl fLbl)
+  = let thPredExp = cgExp predE
         thTExp = cgGotoExp emap dirtyVars tLbl
         thFExp = cgGotoExp emap dirtyVars fLbl
         thStmt = NoBindS $ CondE thPredExp thTExp thFExp
@@ -107,15 +109,27 @@ cgStmt _ _ (NewArray arr n)
   = let thStmt = BindS (BangP $ VarP $ cgVarName arr)
                        (TH.AppE newArrayFn len)
         newArrayFn = TH.VarE $ mkName "newArray"
-        len = cgVar n
+        len = cgExp n
+    in  thStmt
+
+cgStmt _ _ (ReadArray x arr i)
+  = let thStmt = LetS [ValD lhs (NormalB rhs) [{-no where clause-}]]
+
+        lhs = BangP $ VarP $ cgVarName x
+        rhs = (TH.AppE (TH.AppE readArrayFn arr_th) i_th)
+
+        readArrayFn = TH.VarE $ mkName "readArray"
+        arr_th = cgVar arr
+        i_th   = cgExp i
+
     in  thStmt
 
 cgStmt _ _ (WriteArray arr i x)
   = let thStmt = NoBindS $ TH.AppE (TH.AppE (TH.AppE writeArrayFn arr_th) i_th) x_th
         writeArrayFn = TH.VarE $ mkName "writeArray"
         arr_th = cgVar arr
-        i_th   = cgVar i
-        x_th   = cgVar x
+        i_th   = cgExp i
+        x_th   = cgExp x
     in  thStmt
 
 cgStmt _ _ (SliceArray arr' arr n)
@@ -123,13 +137,13 @@ cgStmt _ _ (SliceArray arr' arr n)
                        (TH.AppE (TH.AppE sliceArrayFn arr_th) n_th)
         sliceArrayFn = TH.VarE $ mkName "sliceArray"
         arr_th = cgVar arr
-        n_th   = cgVar n
+        n_th   = cgExp n
     in  thStmt
 
 cgStmt _ _ (Return v)
   = let thStmt   = NoBindS $ TH.AppE returnFn v_th
         returnFn = TH.VarE $ mkName "return"
-        v_th     = cgVar v
+        v_th     = cgExp v
     in  thStmt
 
 
@@ -162,29 +176,16 @@ cgExp :: Lp.Expr -> TH.Exp
 cgExp (Lp.VarE v)
   = cgVar v
 
-cgExp (Lp.App1 f v)
-  = let th_f = cgVar f
-        th_v = cgVar v
-    in  TH.AppE th_f th_v
+cgExp (Lp.AppE f x)
+  = let th_f = cgExp f
+        th_x = cgExp x
+    in  TH.AppE th_f th_x
 
-cgExp (Lp.App2 f v1 v2)
-  = let th_f  = cgVar f
-        th_v1 = cgVar v1
-        th_v2 = cgVar v2
-    in  TH.AppE (TH.AppE th_f th_v1) th_v2
-
-cgExp (Lp.App3 f v1 v2 v3)
-  = let th_f  = cgVar f
-        th_v1 = cgVar v1
-        th_v2 = cgVar v2
-        th_v3 = cgVar v3
-    in  TH.AppE (TH.AppE (TH.AppE th_f th_v1) th_v2) th_v3
-
-cgExp (Lp.FunE term)
+cgExp (Lp.TermE term)
   = cgHOAS term
 
-cgExp (Lp.IntLit i)
-  = TH.LitE $ TH.IntegerL $ toInteger i
+cgExp (Lp.LitE e)
+  = cgElt e
 
 
 cgHOAS :: (Typeable t) => HOAS.Term t -> TH.Exp
@@ -227,7 +228,6 @@ cgDeBruijn = cg (-1)
       | otherwise = 'v':show n
       where
         n = lvl - idxToInt idx
-
 
 
 
@@ -302,11 +302,11 @@ pluginEntryCodeTH entryFnName loop resultTy
     ty1 `to` ty2 = AppT (AppT ArrowT ty1) ty2
 
     -- Applies the arg to fd function (fromDynamic, expected to be in scope)
-    coerceArgE = AppE (TH.VarE $ mkName "fd")
+    coerceArgE = TH.AppE (TH.VarE $ mkName "fd")
 
-    toDynamicE = AppE (TH.VarE $ mkName "toDyn")
+    toDynamicE = TH.AppE (TH.VarE $ mkName "toDyn")
 
-    runSTE     = AppE (TH.VarE $ mkName "runST")
+    runSTE     = TH.AppE (TH.VarE $ mkName "runST")
 
     -- E.g. run
     tyEntryName   = TH.mkName "run"
@@ -377,8 +377,8 @@ preamble moduleName =
   "lengthArray :: Unbox a => V.Vector a -> Int                             " ++\
   "lengthArray = V.length                                                  " ++\
   "                                                                        " ++\
-  "readArray :: V.Unbox a => Int -> V.Vector a -> a                        " ++\
-  "readArray i arr = V.unsafeIndex arr i                                   " ++\
+  "readArray :: V.Unbox a => V.Vector a -> Int -> a                        " ++\
+  "readArray = V.unsafeIndex                                               " ++\
   "                                                                        " ++\
   "writeArray :: V.Unbox a => MV.MVector s a -> Int -> a -> ST s ()        " ++\
   "writeArray arr i x = MV.unsafeWrite arr i x                             " ++\

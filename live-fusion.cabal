@@ -11,7 +11,7 @@ Cabal-Version:       >=1.8
 
 Library
   Exposed-Modules:
-    -- Front end
+    -- Frontend
     Data.LiveFusion.Combinators
     Data.LiveFusion.Types
 
@@ -33,6 +33,7 @@ Library
     Data.LiveFusion.HsBackend
     Data.LiveFusion.HsBackend.Prelude
     Data.LiveFusion.HsBackend.THDefinitions
+    Data.LiveFusion.HsBackend.Types
     Data.LiveFusion.HsCodeGen
     Data.LiveFusion.HsEvaluator
 

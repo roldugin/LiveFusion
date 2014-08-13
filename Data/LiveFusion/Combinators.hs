@@ -257,29 +257,26 @@ fuse env = fuse'
     fuse' (ManifestG vec) uq
         = let arrVar    = arrayVar uq
 
-              -- BODY
-              aVar      = eltVar uq                   -- result of every read
-              aBind     = bindStmt aVar (App2 readFn ixVar arrVar) -- read statement
-              bodyStmts = [aBind]
-
               -- INIT
               lenVar    = lengthVar uq
-              lenBind   = bindStmt lenVar (App1 lengthFn arrVar)
-              ixVar     = indexVar uq                 -- index
-              ixInit    = bindStmt ixVar (IntLit 0)   -- index initialization
+              lenBind   = bindStmt lenVar (AppE (varE lengthFn) (varE arrVar))
+              ixVar     = indexVar uq                     -- index variable
+              ixInit    = bindStmt ixVar (LitE (0::Int))  -- index initialization
               initStmts = [ixInit, lenBind]
 
-              -- BOTTOM
-              oneVar    = var "one" uq
-              oneBind   = bindStmt oneVar (IntLit 1)  -- index step
-              ixUpdate  = assignStmt ixVar (App2 plusFn ixVar oneVar)
-              botStmts  = [oneBind, ixUpdate]
-
               -- GUARD
-              predVar   = var "pred" uq -- boolean guard predicate
-              predBind  = bindStmt predVar (App2 ltFn ixVar lenVar)
-              ixGuard   = guardStmt predVar (doneLbl uq)
-              grdStmts  = [predBind, ixGuard]
+              predE     = AppE (AppE (varE ltFn) (varE ixVar)) (varE lenVar) -- boolean guard predicate
+              ixGuard   = guardStmt predE (doneLbl uq)
+              grdStmts  = [ixGuard]
+
+              -- BODY
+              aVar      = eltVar uq                            -- result of every read
+              aBind     = readArrStmt aVar arrVar (varE ixVar) -- read statement
+              bodyStmts = [aBind]
+
+              -- BOTTOM
+              ixUpdate  = assignStmt ixVar (AppE (AppE (varE plusFn) (varE ixVar)) (LitE (1::Int)))
+              botStmts  = [ixUpdate]
 
               -- LOOP
               loop      = setArrResultOnly uq
@@ -302,12 +299,12 @@ fuse env = fuse'
 
               -- Binding for `f`
               fVar      = var "f" uq            -- name of function to apply
-              fBody     = FunE (lam f)          -- f's body in HOAS representation
+              fBody     = TermE (lam f)         -- f's body in HOAS representation
               fBind     = bindStmt fVar fBody   -- f = <HOAS.Term>
 
               -- Binding for result element `b`
               bVar      = eltVar uq             -- resulting element variable
-              fApp      = App1 fVar aVar        -- function application
+              fApp      = AppE (varE fVar) (varE aVar) -- function application
               bBind     = bindStmt bVar fApp    -- bind result
 
               bodyStmts = [fBind, bBind]        -- body block has two statements
@@ -339,7 +336,7 @@ fuse env = fuse'
               fVar      = var "f" uq
               -- >fBody     = CodeE (getImpl f)
               -- >fBind     = bindStmt fVar fBody
-              fApp      = App2 fVar aVar bVar
+              fApp      = AppE (AppE (varE fVar) (varE aVar)) (varE bVar)
               cBind     = bindStmt cVar fApp
               bodyStmts = [cBind]
 
@@ -357,30 +354,25 @@ fuse env = fuse'
               aVar      = eltVar arr_uq
 
               -- INIT
-              ixVar     = indexVar uq                 -- writing index
-              ixInit    = bindStmt ixVar (IntLit 0)    -- index initialization
+              ixVar     = indexVar uq                     -- writing index
+              ixInit    = bindStmt ixVar (LitE (0::Int))  -- index initialization
               initStmts = [ixInit]
 
               -- BODY
-              pVar      = var "p" uq
-              pApp      = App1 pVar aVar
-              boolVar   = var "bool" uq
-              boolBind  = bindStmt boolVar pApp
-              guard     = guardStmt boolVar (bottomLbl uq)
+              predExp   = AppE (TermE (lam p)) (varE aVar)
+              guard     = guardStmt predExp (bottomLbl uq)
               resVar    = eltVar uq
               resBind   = bindStmt resVar (VarE aVar)
               -- NOTE: This will bug out if there are more guards
               --       or anything else important in the remainder of the body
-              bodyStmts = [boolBind, guard, resBind]
+              bodyStmts = [guard, resBind]
 
               -- WRITE
               -- WARNING: Assignment statement preceeds the array write stmt (added in the postprocess step)
               --          It it fine with the current semantics as the unupdated index will be used,
               --          however this is error prone and may not be true with code gens other than HsCodeGen.
-              oneVar    = var "one" uq
-              oneBind   = bindStmt oneVar (IntLit 1)  -- index step
-              ixUpdate  = assignStmt ixVar (App2 plusFn ixVar oneVar)
-              writeStmts = [oneBind, ixUpdate]
+              ixUpdate  = assignStmt ixVar (AppE (AppE (varE plusFn) (varE ixVar)) (LitE (1::Int)))  -- index step
+              writeStmts = [ixUpdate]
 
               -- LOOP
               loop      = setArrResultOnly uq
@@ -409,7 +401,7 @@ fuse env = fuse'
               bBind     = bindStmt bVar (VarE accVar) -- resulting element in current accum
               bodyStmts = [bBind]
               -- BOTTOM
-              fApp      = App2 fVar accVar aVar
+              fApp      = AppE (AppE (varE fVar) (varE accVar)) (varE aVar)
               accUpdate = assignStmt accVar fApp
               botStmts  = [accUpdate]
               -- LOOP

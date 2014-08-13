@@ -12,6 +12,10 @@ import Data.LiveFusion.Types
 import Data.LiveFusion.AliasMap ( AliasMap )
 import qualified Data.LiveFusion.AliasMap as AMap
 
+-- We should not be importing any backend specific stuff, but for now we hardcoded Exp to be depend on THElt
+-- That is, elements that can be generated in TemplateHaskell
+import Data.LiveFusion.HsBackend.Types
+
 import Data.Map ( Map )
 import qualified Data.Map as Map
 import Data.Maybe
@@ -119,21 +123,24 @@ instance Show Label where
 
 data Stmt = Bind   Var Expr
           | Assign Var Expr
-          | Case   Var Label Label
-          | Guard  Var Label
+          | Case   Expr Label Label
+          | Guard  Expr Label
           | Goto   Label
-          | Return Var
+          | Return Expr
           -- Array statements.
           -- They are here because they are stateful operations.
           -- Perhaps there is a cleaner way to do this.
-          | NewArray   Var {- Array name -}
-                       Var {- Array length -}
-          | WriteArray Var {- Array name -}
-                       Var {- Index -}
-                       Var {- Element -}
-          | SliceArray Var {- New array name (TODO: ugly) -}
-                       Var {- Array name -}
-                       Var {- Array length -}
+          | NewArray   Var  {- Array name -}
+                       Expr {- Array length -}
+          | ReadArray  Var  {- Variable to read into -}
+                       Var  {- Array name -}
+                       Expr {- Index -}
+          | WriteArray Var  {- Array name -}
+                       Expr {- Index -}
+                       Expr {- Element -}
+          | SliceArray Var  {- New array name (TODO: ugly) -}
+                       Var  {- Array name -}
+                       Expr {- Array length -}
 
 
 bindStmt     = Bind
@@ -143,6 +150,7 @@ guardStmt    = Guard
 gotoStmt     = Goto
 returnStmt   = Return
 newArrStmt   = NewArray
+readArrStmt  = ReadArray
 writeArrStmt = WriteArray
 sliceArrStmt = SliceArray
 
@@ -313,16 +321,17 @@ pprBlock (Block stmts mbfinal)
 pprStmt :: Stmt -> String
 pprStmt (Bind v e)     = "let " ++ pprVar v ++ " = " ++ pprExpr e
 pprStmt (Assign v e)   = pprVar v ++ " := " ++ pprExpr e
-pprStmt (Guard v l)    = "guard on " ++ pprVar v ++ " | onFail: " ++ pprLabel l
-pprStmt (Case p l1 l2) = "if " ++ pprVar p ++
+pprStmt (Guard p l)    = "guard on " ++ pprExpr p ++ " | onFail: " ++ pprLabel l
+pprStmt (Case p l1 l2) = "if " ++ pprExpr p ++
                          " then " ++ pprLabel l1 ++
                          " else " ++ pprLabel l2
 pprStmt (Goto l)       = "goto " ++ pprLabel l
-pprStmt (NewArray arr n)        = pprVar arr ++ " = newArray " ++ pprVar n
-pprStmt (WriteArray arr i x)    = pprVar arr ++ "[" ++ pprVar i ++ "] := " ++ pprVar x
-pprStmt (SliceArray arr' arr n) = pprVar arr' ++ " = sliceArray " ++ pprVar arr ++ " " ++ pprVar n
-pprStmt (Return v)     = "return " ++ pprVar v
-pprStmt _              = "Unknown Stmt"
+pprStmt (NewArray arr n)        = pprVar arr ++ " = newArray " ++ pprExpr n
+pprStmt (ReadArray x arr i)     = pprVar x ++ " = " ++ pprVar arr ++ "[" ++ pprExpr i ++ "]"
+pprStmt (WriteArray arr i x)    = pprVar arr ++ "[" ++ pprExpr i ++ "] := " ++ pprExpr x
+pprStmt (SliceArray arr' arr n) = pprVar arr' ++ " = sliceArray " ++ pprVar arr ++ " " ++ pprExpr n
+pprStmt (Return e)     = "return " ++ pprExpr e
+pprStmt _              = "pprStmt: Unknown Statement"
 
 
 pprLabel :: Label -> String
@@ -506,28 +515,37 @@ adoptBlock lbl env
 
 -- | Retrieves the free variables of an expression
 varsE :: Expr -> [Var]
-varsE (VarE v) = [v]
-varsE (App1 f v) = [f, v]
-varsE (App2 f v1 v2) = [f, v1, v2]
-varsE (App3 f v1 v2 v3) = [f, v1, v2, v3]
-varsE (FunE _) = [] -- DeBruijn Terms are closed
-varsE (IntLit _) = []
+varsE (VarE v)   = [v]
+varsE (AppE f x) = varsE f ++ varsE x
+varsE (TermE _)  = [] -- DeBruijn Terms are closed
+varsE (LitE _)   = [] -- Literals are constant terms
 
 
+-- | Compute Environment for a block
+--
+-- Loops for:
+-- + New variable declarations (declare)
+-- + Variables assumed to be in scope (assume/assumeAllIn)
+-- + Other blocks to which it is possible to jump from this block (adoptBlock)
+-- + Variable mutations/updates (markEnvDirty)
+--
+-- Call to declare should come last to be more sure nothings is declared more than once.
 blockEnv :: Block -> Env
 blockEnv blk = foldl (flip analyse) emptyEnv (blockStmts blk)
   where
     analyse :: Stmt -> Env -> Env
-    analyse (Bind v e)     = assumeMany (varsE e) >>> declare v
-    analyse (Assign v e)   = assumeMany (varsE e) >>> markEnvDirty v
-    analyse (Case v lt lf) = assume v >>> adoptBlock lt >>> adoptBlock lf
-    analyse (Guard p lf)   = assume p >>> adoptBlock lf
+    analyse (Bind v e)     = assumeAllIn e >>> declare v
+    analyse (Assign v e)   = assumeAllIn e >>> markEnvDirty v
+    analyse (Case p lt lf) = assumeAllIn p >>> adoptBlock lt >>> adoptBlock lf
+    analyse (Guard p lf)   = assumeAllIn p >>> adoptBlock lf
     analyse (Goto l)       = adoptBlock l
-    analyse (NewArray arr n)        = assume n >>> declare arr
-    analyse (WriteArray arr i x)    = assumeMany [arr, i, x]
-    analyse (SliceArray arr' arr n) = assume arr >>> assume n >>> declare arr'
-    analyse (Return v)     = assume v
+    analyse (NewArray arr n)        = assumeAllIn n >>> declare arr
+    analyse (ReadArray x arr i)     = assume arr >>> assumeAllIn i >>> declare x
+    analyse (WriteArray arr i x)    = assume arr >>> assumeAllIn i >>> assumeAllIn x
+    analyse (SliceArray arr' arr n) = assume arr >>> assumeAllIn n >>> declare arr'
+    analyse (Return v)     = assumeAllIn v
 
+    assumeAllIn = assumeMany . varsE
 
 -- | Transitive environment assumptions
 --
@@ -622,10 +640,10 @@ rewriteLoopLabels loop
 insertResultArray :: Loop -> Loop
 insertResultArray loop
   | Just uq <- loopArrResult loop
-  = let alloc = newArrStmt arr bound
-        write = writeArrStmt arr ix elt
-        slice = sliceArrStmt resultVar arr ix
-        ret   = returnStmt resultVar
+  = let alloc = newArrStmt arr (varE bound)
+        write = writeArrStmt arr (varE ix) (varE elt)
+        slice = sliceArrStmt resultVar arr (varE ix)
+        ret   = returnStmt (varE resultVar)
 
         arr   = arrayVar  uq
         bound = lengthVar uq
@@ -659,8 +677,9 @@ reorderDecls loop = loop { loopBlockMap = AMap.map perblock (loopBlockMap loop) 
     reorder = uncurry (++)
             . partition isDecl
 
-    isDecl (Bind   _ _) = True
-    isDecl (Assign _ _) = True
+    isDecl (Bind   _ _)      = True
+    isDecl (Assign _ _)      = True
+    isDecl (ReadArray _ _ _) = True
     isDecl _            = False
 
 instance Monoid Loop where
@@ -710,33 +729,35 @@ appendLoopBlockMap (Block stmts1 final1) (Block stmts2 final2)
 --      language.
 --
 data Expr where
-  VarE   :: Var                              -> Expr
-  App1   :: Var -> Var                       -> Expr
-  App2   :: Var -> Var -> Var                -> Expr
-  App3   :: Var -> Var -> Var -> Var         -> Expr
-  FunE   :: (Typeable t) => HOAS.Term t      -> Expr
-  IntLit :: Int                              -> Expr
+  VarE  :: Var                              -> Expr
+  AppE  :: Expr -> Expr                     -> Expr
+  TermE :: (Typeable t) => HOAS.Term t      -> Expr
+  LitE  :: (THElt e, Elt e) => e            -> Expr
 
 instance Show Expr where
   show = pprExpr
 
---deleteriving instance Eq Expr
 
+vAppE :: Var -> Var -> Expr
+vAppE f x = AppE (varE f) (varE x)
+
+
+varE :: Var -> Expr
+varE = VarE
+
+
+constE :: (THElt e, Elt e) => e -> Expr
+constE = LitE
 
 
 pprExpr :: Expr -> String
 pprExpr (VarE v)
   = pprVar v
-pprExpr (App1 f x)
-  = pprVar f `space` pprVar x
-pprExpr (App2 f x y)
-  = pprVar f `space` pprVar x `space` pprVar y
-pprExpr (App3 f x y z)
-  = pprVar f `space` pprVar x `space`
-    pprVar y `space` pprVar z
-pprExpr (FunE _)
+pprExpr (AppE f x)
+  = (pprExpr f) `space` (pprExpr x)
+pprExpr (TermE _)
   = "<Code>"
-pprExpr (IntLit i)
+pprExpr (LitE i)
   = show i
 
 
