@@ -366,6 +366,7 @@ preamble moduleName =
   "import Data.Dynamic                                                     " ++\
   "import GHC.Prim (Any)                                                   " ++\
   "import GHC.Num                                                          " ++\
+  "import GHC.Classes                                                      " ++\
   "import Control.Monad.ST                                                 " ++\
   "import Control.Monad.Primitive                                          " ++\
   "                                                                        " ++\

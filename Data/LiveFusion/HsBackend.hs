@@ -54,6 +54,9 @@ defaultImpl f = Impl { hs = f, th = Nothing }
 
 -------------------------------------------------------------------------------
 -- Prelude --------------------------------------------------------------------
+-- TODO this stuff should really be hidden somewhere is HaBackend hierarchy
+
+-- Num ------------------------------------------------------------------------
 
 plusImpl, timesImpl, minusImpl :: Num a => Impl (a -> a -> a)
 plusImpl = Impl { hs = $plusTH, th = Just plusTH }
@@ -67,3 +70,23 @@ signumImpl = Impl $signumTH (Just signumTH)
 
 fromIntegerImpl :: Num a => Integer -> Impl a
 fromIntegerImpl n = Impl (($fromIntegerTH) n) (Just [| $fromIntegerTH n |])
+
+
+-- Eq -------------------------------------------------------------------------
+
+eqImpl, neImpl :: Eq a => Impl (a -> a -> Bool)
+eqImpl = Impl { hs = $eqTH, th = Just eqTH }
+neImpl = Impl { hs = $neTH, th = Just neTH }
+
+
+-- Ord ------------------------------------------------------------------------
+
+ltImpl, leImpl, gtImpl, geImpl :: Ord a => Impl (a -> a -> Bool)
+ltImpl = Impl { hs = $ltTH, th = Just ltTH }
+leImpl = Impl { hs = $leTH, th = Just leTH }
+gtImpl = Impl { hs = $gtTH, th = Just gtTH }
+geImpl = Impl { hs = $geTH, th = Just geTH }
+
+minImpl, maxImpl :: Ord a => Impl (a -> a -> a)
+minImpl = Impl { hs = $minTH, th = Just minTH }
+maxImpl = Impl { hs = $maxTH, th = Just maxTH }
