@@ -54,17 +54,17 @@ type ArrayAST a = AST (V.Vector a)
 -- | Abstract Syntax Tree whose nodes represent delayed collective array operations.
 data AST e where
   Map      :: (Elt a, Elt b)
-           => Fun (a -> b)
+           => (Term a -> Term b)
            -> ArrayAST a
            -> ArrayAST b
 
   Filter   :: Elt a
-           => Fun (a -> Bool)
+           => (Term a -> Term Bool)
            -> ArrayAST a
            -> ArrayAST a
 
   ZipWith  :: (Elt a, Elt b, Elt c)
-           => Fun (a -> b -> c)
+           => (Term a -> Term b -> Term c)
            -> ArrayAST a
            -> ArrayAST b
            -> ArrayAST c
@@ -75,19 +75,19 @@ data AST e where
            -> ArrayAST (a,b)
 
   Fold     :: Elt a
-           => Fun (a -> a -> a)
+           => (Term a -> Term a -> Term a)
            -> ScalarAST a
            -> ArrayAST a
            -> ScalarAST a
 
   Scan     :: Elt a
-           => Fun (a -> a -> a)
+           => (Term a -> Term a -> Term a)
            -> ScalarAST a
            -> ArrayAST a
            -> ArrayAST a
 
   Fold_s   :: Elt a
-           => Fun (a -> a -> a)
+           => (Term a -> Term a -> Term a)
            -> ScalarAST a
            -> ArrayAST Int
            -> ArrayAST a
@@ -113,11 +113,10 @@ deriving instance Show (WrappedASG Unique)
 type ScalarASG a s = ASG a s
 type ArrayASG a s = ASG (V.Vector a) s
 
-
---type Fun t = HOAS.Term t
-type family Fun a where
-  Fun (a -> b) = HOAS.Term a -> HOAS.Term b
-  Fun a = HOAS.Term a
+-- The following fails for 2+ argument functions
+--type family Fun t where
+--  Fun (a -> b) = HOAS.Term a -> HOAS.Term b
+--  Fun a = HOAS.Term a
 
 
 -- | Abstract Semantic Graph is a directed acyclic graph derived from the AST
@@ -127,17 +126,17 @@ type family Fun a where
 --     variables of the same name.
 data ASG e s where
   MapG      :: (Elt a, Elt b)
-            => Fun (a -> b)
+            => (Term a -> Term b)
             -> ArrayASG a s
             -> ArrayASG b s
 
   FilterG   :: Elt a
-            => Fun (a -> Bool)
+            => (Term a -> Term Bool)
             -> ArrayASG a s
             -> ArrayASG a s
 
   ZipWithG  :: (Elt a, Elt b, Elt c)
-            => Fun (a -> b -> c)
+            => (Term a -> Term b -> Term c)
             -> ArrayASG a s
             -> ArrayASG b s
             -> ArrayASG c s
@@ -148,13 +147,13 @@ data ASG e s where
             -> ArrayASG (a,b) s
 
   FoldG     :: Elt a
-            => Fun (a -> a -> a)
+            => (Term a -> Term a -> Term a)
             -> ScalarASG a s
             -> ArrayASG a s
             -> ScalarASG a s
 
   ScanG     :: Elt a
-            => Fun (a -> a -> a)
+            => (Term a -> Term a -> Term a)
             -> ScalarASG a s
             -> ArrayASG a s
             -> ArrayASG a s
@@ -168,7 +167,7 @@ data ASG e s where
             -> ScalarASG a s
 
   Fold_sG   :: Elt a
-            => Fun (a -> a -> a)
+            => (Term a -> Term a -> Term a)
             -> ScalarASG a s
             -> ArrayASG Int s
             -> ArrayASG a s
@@ -242,6 +241,7 @@ recoverSharing e = do
   let m = Map.fromList l
   return (m, n, getASTNode m n)
 {-# NOINLINE recoverSharing #-}
+
 
 
 fuse :: Typeable e => Map Unique (WrappedASG Unique) -> (ASG e Unique) -> Unique -> (Loop, Unique)
@@ -332,13 +332,17 @@ fuse env = fuse'
               abrr_loop = arr_loop' `Loop.append` brr_loop'
 
               -- BODY
-              cVar      = eltVar uq
-              fVar      = var "f" uq
-              -- >fBody     = CodeE (getImpl f)
-              -- >fBind     = bindStmt fVar fBody
-              fApp      = AppE (AppE (varE fVar) (varE aVar)) (varE bVar)
-              cBind     = bindStmt cVar fApp
-              bodyStmts = [cBind]
+
+              -- Binding for `f`
+              fVar      = var "f" uq            -- name of function to apply
+              fBody     = TermE (lam2 f)        -- f's body in HOAS representation
+              fBind     = bindStmt fVar fBody   -- f = <HOAS.Term>              
+
+              cVar      = eltVar uq             -- resulting element variable
+              fApp      = (varE fVar) `AppE` (varE aVar) `AppE` (varE bVar) -- function application
+              cBind     = bindStmt cVar fApp    -- bind result
+
+              bodyStmts = [fBind,cBind]
 
               -- LOOP
               loop      = setArrResultOnly uq
@@ -390,25 +394,34 @@ fuse env = fuse'
     fuse' (ScanG f z arr) uq
         = let (arr_loop, arr_uq) = fuse' arr uq
               aVar      = eltVar arr_uq
-              fVar      = var "f" uq
               zVar      = var "z" uq
+
+              zBind     = bindStmt zVar (TermE $ getScalar z uq)
+              
               -- INIT
               accVar    = var "acc" uq                -- accumulator
               accInit   = bindStmt accVar (VarE zVar)  -- accum initialization
-              initStmts = [accInit]
+              initStmts = [zBind, accInit]
+
               -- BODY
               bVar      = eltVar uq
               bBind     = bindStmt bVar (VarE accVar) -- resulting element in current accum
               bodyStmts = [bBind]
               -- BOTTOM
+
+              -- Binding for `f`
+              fVar      = var "f" uq            -- name of function to apply
+              fBody     = TermE (lam2 f)        -- f's body in HOAS representation
+              fBind     = bindStmt fVar fBody   -- f = <HOAS.Term>  
+
               fApp      = AppE (AppE (varE fVar) (varE accVar)) (varE aVar)
               accUpdate = assignStmt accVar fApp
-              botStmts  = [accUpdate]
+              botStmts  = [fBind, accUpdate]
+
               -- LOOP
               loop      = setArrResult uq
                         $ setScalarResult accVar
-                        -- >$ addArg fVar (toDyn f)
-                        $ addArg zVar (toDyn z)
+                        -- $ addArg zVar (toDyn z)
                         $ addStmts initStmts (initLbl uq)
                         $ addStmts bodyStmts (bodyLbl uq)
                         $ addStmts botStmts  (bottomLbl uq)
@@ -421,7 +434,18 @@ fuse env = fuse'
     fuse' (Fold_sG f z lens arr) uq
         = let (arr_loop, arr_uq)   = fuse' arr uq
               (lens_loop, lens_uq) = fuse' lens uq
-          in undefined              
+          in undefined
+
+    -- | We store scalars in AST/ASG however, we're not yet clever about computing them.
+    --   For not we assume that any scalar AST could only be constructed using Scalar constructor
+    getScalar :: (Typeable e, Elt e) => (ASG e Unique) -> Unique -> Term e
+    getScalar var@(VarG uq) _
+        = let ast = fromJust
+                  $ (getASTNode env uq) `asTypeOf` (Just var)
+          in  getScalar ast uq
+    getScalar (ScalarG term) _ = term
+    getScalar _ _ = error "getScalar: Failed scalar lookup. Make sure the scalar argument is constructed with Scalar AST constructor."
+
      
 
 -- | Sets the upper bound of an array to be the same as that
