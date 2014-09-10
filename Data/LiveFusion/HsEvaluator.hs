@@ -11,6 +11,7 @@ import GHC hiding ( Unique, pprExpr ) -- TODO instead import what's needed
 import GHC.Paths -- ( libdir )
 import DynFlags -- ( defaultFatalMessager, defaultFlushOut )
 import Control.Exception
+import Control.Monad
 import Debug.Trace
 import System.IO
 import System.IO.Unsafe
@@ -19,9 +20,17 @@ import Data.Reify
 import Data.Reify.Graph
 import Data.Dynamic
 import Data.Map as Map ( elems )
+import Data.Functor
 
 import Data.LiveFusion.Loop
 import Data.LiveFusion.HsCodeGen
+
+
+-- | Set this to enable/disable dumping GHC core of compiled plugins
+--
+-- NOTE: This won't work from inside GHCi.
+dEBUG_DUMP :: Bool
+dEBUG_DUMP = False
 
 
 defaultEntryFunctionName :: String
@@ -56,10 +65,13 @@ dump code h = hPutStrLn h code >> hClose h
 compileAndLoad :: FilePath -> String -> String -> IO ([Arg] -> Arg)
 compileAndLoad hsFilePath moduleName entryFnName =
     defaultErrorHandler defaultFatalMessager defaultFlushOut $ do
+      when dEBUG_DUMP
+        (void $ parseStaticFlags $ noLoc <$> ["-ddump-to-file", "-ddump-simpl", "-dsuppress-all"])
       runGhc (Just libdir) $ do
         dflags <- getSessionDynFlags
         let dflags' = gopt_set dflags Opt_BuildDynamicToo
-        setSessionDynFlags dflags'
+        let dflags'' = dflags' { optLevel = 2 }
+        setSessionDynFlags dflags''
         target <- guessTarget hsFilePath Nothing
         setTargets [target]
         r <- load LoadAllTargets
