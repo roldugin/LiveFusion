@@ -93,6 +93,13 @@ data AST e where
            -> ArrayAST a
            -> ArrayAST a
 
+  Scan_s   :: Elt a
+           => (Term a -> Term a -> Term a)
+           -> ScalarAST a
+           -> ArrayAST Int
+           -> ArrayAST a
+           -> ArrayAST a
+
   Manifest :: Elt a
            => V.Vector a
            -> ArrayAST a
@@ -173,6 +180,13 @@ data ASG e s where
             -> ArrayASG a s
             -> ArrayASG a s
 
+  Scan_sG   :: Elt a
+            => (Term a -> Term a -> Term a)
+            -> ScalarASG a s
+            -> ArrayASG Int s
+            -> ArrayASG a s
+            -> ArrayASG a s
+
   VarG      :: Typeable e
             => s
             -> ASG e s
@@ -225,6 +239,12 @@ instance Typeable e => MuRef (AST e) where
           <*> (VarG <$> ap lens)
           <*> (VarG <$> ap arr)
 
+      mapDeRef' ap (Scan_s f z segd arr)
+        = Scan_sG f
+          <$> (VarG <$> ap z)
+          <*> (VarG <$> ap segd)
+          <*> (VarG <$> ap arr)
+
       mapDeRef' ap (Manifest vec)
         = pure $ ManifestG vec
 
@@ -275,7 +295,7 @@ fuse env = fuse'
               bodyStmts = [aBind]
 
               -- BOTTOM
-              ixUpdate  = assignStmt ixVar (AppE (AppE (varE plusFn) (varE ixVar)) (LitE (1::Int)))
+              ixUpdate  = assignStmt ixVar ((varE plusFn) `AppE` (varE ixVar) `AppE` (LitE (1::Int)))
               botStmts  = [ixUpdate]
 
               -- LOOP
@@ -394,19 +414,21 @@ fuse env = fuse'
     fuse' (ScanG f z arr) uq
         = let (arr_loop, arr_uq) = fuse' arr uq
               aVar      = eltVar arr_uq
-              zVar      = var "z" uq
-
-              zBind     = bindStmt zVar (TermE $ getScalar z uq)
-              
+ 
               -- INIT
+              zVar      = var "z" uq
+              zBind     = bindStmt zVar (TermE $ getScalar z uq)
+
               accVar    = var "acc" uq                -- accumulator
-              accInit   = bindStmt accVar (VarE zVar)  -- accum initialization
+              accInit   = bindStmt accVar (VarE zVar) -- accumulator initialization
+
               initStmts = [zBind, accInit]
 
               -- BODY
               bVar      = eltVar uq
-              bBind     = bindStmt bVar (VarE accVar) -- resulting element in current accum
+              bBind     = bindStmt bVar (VarE accVar) -- resulting element is current accumulator
               bodyStmts = [bBind]
+
               -- BOTTOM
 
               -- Binding for `f`
@@ -414,7 +436,7 @@ fuse env = fuse'
               fBody     = TermE (lam2 f)        -- f's body in HOAS representation
               fBind     = bindStmt fVar fBody   -- f = <HOAS.Term>  
 
-              fApp      = AppE (AppE (varE fVar) (varE accVar)) (varE aVar)
+              fApp      = (varE fVar) `AppE` (varE accVar) `AppE` (varE aVar)
               accUpdate = assignStmt accVar fApp
               botStmts  = [fBind, accUpdate]
 
@@ -431,10 +453,103 @@ fuse env = fuse'
                         $ arr_loop
           in  (loop, uq)
 
+
     fuse' (Fold_sG f z lens arr) uq
         = let (arr_loop, arr_uq)   = fuse' arr uq
               (lens_loop, lens_uq) = fuse' lens uq
           in undefined
+
+
+    fuse' (Scan_sG f z segd arr) uq
+        = let (arr_loop, arr_uq)   = fuse' arr uq
+              aVar      = eltVar arr_uq           -- an element from data array
+
+              (segd_loop, segd_uq) = fuse' segd uq
+              seglenVar = eltVar segd_uq          -- an element from segd array
+
+              -- INIT_segd (run once)
+              zVar      = var "z" uq
+              zBind     = bindStmt zVar (TermE $ getScalar z uq)              
+              initStmts_segd = [zBind]
+
+              -- BODY_segd (run before each segment, and acts like init for the segment loop)
+              jVar      = var "j" uq  -- element counter that resets with every segment
+              jReset    = bindStmt jVar (LitE (0::Int))
+
+              accVar    = var "acc" uq                -- accumulator
+              accReset  = bindStmt accVar (VarE zVar) -- accumulator initialisation
+
+              bodyStmts_segd = [jReset, accReset]
+              segd2dataJump  = updateBlock (bodyLbl segd_uq)
+                                           (setBlockFinal $ gotoStmt (guardLbl arr_uq))
+
+              -- BOTTOM_segd (run after each segment)
+              -- Nothing here
+
+              -- DONE_segd
+              linkDones = updateBlock (doneLbl segd_uq)
+                                      (setBlockFinal $ gotoStmt (doneLbl arr_uq))
+
+              -- INIT_data (run once)
+              -- No new statements here but we do change the final statement to
+              -- goto INIT_segd, so both loop are properly initialised
+              linkInits = updateBlock (initLbl arr_uq)
+                                      (setBlockFinal $ gotoStmt (initLbl segd_uq))
+
+              -- GUARD_data (run for each element)
+              -- Check if we reached the end of segment
+              segendPred= (varE ltFn) `AppE` (varE jVar) `AppE` (varE seglenVar)
+              jGuard    = guardStmt segendPred (writeLbl segd_uq) -- jump out of the loop into segd loop
+              grdStmts_data = [jGuard]
+              -- TODO
+              -- The guard of block of data loop already has a guard with goto doneLbl_data.
+              -- However, the preexisting guard is redundant (assuming segd is correct)
+              -- We may want to replace current guards with new ones
+
+
+              -- BODY_data (run for each element)
+              bVar      = eltVar uq
+              bBind     = bindStmt bVar (VarE accVar) -- resulting element is current accumulator
+              bodyStmts_data = [bBind]
+
+              -- BOTTOM_data (run for each element)
+              -- Binding for `f`
+              fVar      = var "f" uq            -- name of function to apply
+              fBody     = TermE (lam2 f)        -- f's body in HOAS representation
+              fBind     = bindStmt fVar fBody   -- f = <HOAS.Term>  
+
+              fApp      = (varE fVar) `AppE` (varE accVar) `AppE` (varE aVar)
+              accUpdate = assignStmt accVar fApp
+
+              -- Increment in-segment counter
+              jUpdate  = assignStmt jVar ((varE plusFn) `AppE` (varE jVar) `AppE` (LitE (1::Int)))
+
+              botStmts_data = [fBind, accUpdate, jUpdate]
+
+              -- LOOP
+              loop      = setArrResult uq
+                        $ setScalarResult accVar
+                        -- Segd (segd_uq) stuff below
+                        $ segd2dataJump
+                        $ addStmts initStmts_segd (initLbl segd_uq)
+                        $ addStmts bodyStmts_segd (bodyLbl segd_uq)
+                        $ linkDones
+                        -- Data (arr_uq/uq) stuff below
+                        $ linkInits
+                        -- $ data2segdJump -- no final in guard
+                        $ replaceStmts grdStmts_data  (guardLbl uq)
+                        $ addStmts bodyStmts_data (bodyLbl uq)
+                        $ addStmts botStmts_data  (bottomLbl uq)
+                        -- The usual stuff
+                        $ rebindIndexAndLengthVars uq arr_uq
+                        -- The data loop is the same rate as the current one: unite uq/arr_uq.
+                        -- This is not the case with segment descriptor loop, so just append it's blocks without merging.
+                        $ addDefaultSynonymLabels uq arr_uq
+                        -- Note: Order of appending matters since we want to enter arr_loop not segd_loop
+                        $ Loop.append arr_loop
+                        $ segd_loop
+          in (loop,uq)
+
 
     -- | We store scalars in AST/ASG however, we're not yet clever about computing them.
     --   For not we assume that any scalar AST could only be constructed using Scalar constructor
@@ -459,7 +574,8 @@ rebindLengthVar nu old = addStmt stmt (initLbl nu)
 --   
 --   Since the index is likely to change it updates it in the guard.
 rebindIndexVar :: Unique -> Unique -> Loop -> Loop
-rebindIndexVar nu old = addStmt stmt (guardLbl nu)
+rebindIndexVar nu old = addStmt stmt (initLbl nu)
+                      . addStmt stmt (guardLbl nu)
   where stmt = bindStmt (indexVar nu) (VarE $ indexVar old)
 
 
