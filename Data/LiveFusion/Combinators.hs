@@ -480,21 +480,10 @@ fuse env = fuse'
               accReset  = bindStmt accVar (VarE zVar) -- accumulator initialisation
 
               bodyStmts_segd = [jReset, accReset]
-              segd2dataJump  = updateBlock (bodyLbl segd_uq)
-                                           (setBlockFinal $ gotoStmt (guardLbl arr_uq))
+
 
               -- BOTTOM_segd (run after each segment)
               -- Nothing here
-
-              -- DONE_segd
-              linkDones = updateBlock (doneLbl segd_uq)
-                                      (setBlockFinal $ gotoStmt (doneLbl arr_uq))
-
-              -- INIT_data (run once)
-              -- No new statements here but we do change the final statement to
-              -- goto INIT_segd, so both loop are properly initialised
-              linkInits = updateBlock (initLbl arr_uq)
-                                      (setBlockFinal $ gotoStmt (initLbl segd_uq))
 
               -- GUARD_data (run for each element)
               -- Check if we reached the end of segment
@@ -529,15 +518,14 @@ fuse env = fuse'
               -- LOOP
               loop      = setArrResult uq
                         $ setScalarResult accVar
+                        -- Common stuff below
+                        $ setFinalGoto (initLbl uq) (guardLbl segd_uq) -- start with outer (segd loop)
                         -- Segd (segd_uq) stuff below
-                        $ segd2dataJump
+                        $ setFinalGoto (bodyLbl segd_uq) (guardLbl uq) -- enter inner loop
                         $ addStmts initStmts_segd (initLbl segd_uq)
                         $ addStmts bodyStmts_segd (bodyLbl segd_uq)
-                        $ linkDones
                         -- Data (arr_uq/uq) stuff below
-                        $ linkInits
-                        -- $ data2segdJump -- no final in guard
-                        $ replaceStmts grdStmts_data  (guardLbl uq)
+                        $ addStmts grdStmts_data  (guardLbl uq)
                         $ addStmts bodyStmts_data (bodyLbl uq)
                         $ addStmts botStmts_data  (bottomLbl uq)
                         -- The usual stuff
@@ -547,6 +535,9 @@ fuse env = fuse'
                         $ addDefaultSynonymLabels uq arr_uq
                         -- Note: Order of appending matters since we want to enter arr_loop not segd_loop
                         $ Loop.append arr_loop
+                        -- Init and Done blocks can be safely merged
+                        $ addSynonymLabel (initLbl arr_uq) (initLbl segd_uq)
+                        $ addSynonymLabel (doneLbl arr_uq) (doneLbl segd_uq)
                         $ segd_loop
           in (loop,uq)
 
@@ -574,9 +565,9 @@ rebindLengthVar nu old = addStmt stmt (initLbl nu)
 --   
 --   Since the index is likely to change it updates it in the guard.
 rebindIndexVar :: Unique -> Unique -> Loop -> Loop
-rebindIndexVar nu old = addStmt stmt (initLbl nu)
-                      . addStmt stmt (guardLbl nu)
-  where stmt = bindStmt (indexVar nu) (VarE $ indexVar old)
+rebindIndexVar nu old = addStmt bndStmt (writeLbl nu)
+                      . addStmt bndStmt (doneLbl nu)
+  where bndStmt = bindStmt (indexVar nu) (VarE $ indexVar old)
 
 
 rebindIndexAndLengthVars :: Unique -> Unique -> Loop -> Loop

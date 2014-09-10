@@ -248,13 +248,19 @@ putBlock lbl blk loop = loop { loopBlockMap = loopBlockMap' }
     loopBlockMap' = AMap.insert lbl blk (loopBlockMap loop)
 
 
--- Append a statement to the specified code block
+-- | Append a statement to the specified code block.
 addStmt :: Stmt -> Label -> Loop -> Loop
 addStmt stmt lbl = updateBlock lbl (addStmtsToBlock [stmt])
 
 
+-- | Append multiple statements to the specified code block.
 addStmts :: [Stmt] -> Label -> Loop -> Loop
 addStmts stmts lbl = updateBlock lbl (addStmtsToBlock stmts)
+
+
+-- | Replace all statements (including final) in a block with the specified ones.
+replaceStmts :: [Stmt] -> Label -> Loop -> Loop
+replaceStmts stmts lbl = updateBlock lbl (const $ addStmtsToBlock stmts emptyBlock)
 
 
 setLoopEntry :: Label -> Loop -> Loop
@@ -265,6 +271,12 @@ unsafeLoopEntry :: Loop -> Label
 unsafeLoopEntry = fromMaybe noEntryErr . loopEntry
   where
     noEntryErr = error "exendedEnv: loop entry must be specified"
+
+
+-- | Sets the final statement of a given block to be goto to another block
+setFinalGoto :: Label -> Label -> Loop -> Loop
+setFinalGoto from to = updateBlock from 
+                                   (setBlockFinal $ gotoStmt to)
 
 
 -- Scalar and Array results manipulation
@@ -379,6 +391,7 @@ addDefaultSynonymLabels nu old loop
   = foldl alias loop [initLbl, guardLbl, bodyLbl, writeLbl, bottomLbl, doneLbl]
   where
     alias loop lblMaker = addSynonymLabel (lblMaker nu) (lblMaker old) loop
+
 
 -- | Add control flow between some of the known blocks
 addDefaultControlFlow :: Id -> Loop -> Loop
