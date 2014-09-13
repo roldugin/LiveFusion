@@ -11,6 +11,9 @@ Cabal-Version:       >=1.8
 
 Library
   Exposed-Modules:
+    -- User facing
+    Data.LiveFusion
+
     -- Frontend
     Data.LiveFusion.Combinators
     Data.LiveFusion.Types
@@ -43,4 +46,16 @@ Library
   GHC-Options: -Odph
 
   Build-Depends:
-    base, containers, filepath, ghc-paths, ghc-prim, ghc >= 7.6, data-reify, vector, template-haskell, transformers, primitive, hashtables, hashable
+    base,
+    containers,
+    data-reify,
+    filepath,
+    ghc >= 7.6,
+    ghc-paths,
+    ghc-prim,
+    hashable,
+    hashtables,
+    primitive,
+    template-haskell,
+    transformers,
+    vector

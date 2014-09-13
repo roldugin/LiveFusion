@@ -586,33 +586,17 @@ resultType :: t a -> a
 resultType _ = undefined
 
 
-instance Show (AST e) where
-  show (Map _ arr) = "MapAST (" P.++ (show arr) P.++ ")"
-  show (Filter _ arr) = "FilterAST (" P.++ (show arr) P.++ ")"
-  show (ZipWith _ arr brr) = "ZipWithAST (" P.++ (show arr) P.++ ") (" P.++ (show brr) P.++ ")"
-  show (Zip arr brr) = "ZipAST (" P.++ (show arr) P.++ ") (" P.++ (show brr) P.++ ")"
-  show (Fold _ _ arr) = "FoldAST (" P.++ (show arr) P.++ ")"
-  show (Manifest vec) = show vec
+instance (Typeable e, Show e) => Show (AST e) where
+  show = show . evalAST
 
---map :: (Elt a, Elt b) => (a -> b) -> ArrayAST a -> ArrayAST b
---map f = Map f
+showAST :: AST e -> String
+showAST (Map _ arr) = "Map (" P.++ (showAST arr) P.++ ")"
+showAST (Filter _ arr) = "Filter (" P.++ (showAST arr) P.++ ")"
+showAST (ZipWith _ arr brr) = "ZipWith (" P.++ (showAST arr) P.++ ") (" P.++ (showAST brr) P.++ ")"
+showAST (Zip arr brr) = "Zip (" P.++ (showAST arr) P.++ ") (" P.++ (showAST brr) P.++ ")"
+showAST (Fold _ _ arr) = "Fold (" P.++ (showAST arr) P.++ ")"
+showAST (Manifest vec) = show vec
 
---filter :: (Elt a) => (a -> Bool) -> ArrayAST a -> ArrayAST a
---filter p = Filter p
-
---zipWith :: (Elt a, Elt b, Elt c) => (a -> b -> c) -> ArrayAST a -> ArrayAST b -> AST (V.Vector c)
---zipWith f arr brr = ZipWith f arr brr
-
---zip :: (Elt a, Elt b) => ArrayAST a -> ArrayAST b -> AST (V.Vector (a,b))
---zip arr brr = Zip arr brr
-
---fold :: Elt a => (a -> a -> a) -> a -> ArrayAST a -> a
---fold f z arr = evalAST $ Fold f z arr
-
---toList :: Elt a => ArrayAST a -> [a]
---toList = V.toList . eval
-fromList :: Elt a => [a] -> ArrayAST a
-fromList = Manifest . V.fromList
 
 
 eval :: Elt a => ArrayAST a -> V.Vector a
@@ -632,7 +616,6 @@ getLoop = postprocessLoop . unsafePerformIO . fuseToLoop
 {-# NOINLINE getLoop #-}
 
 -------------- Tests -------------------------
-fl = Data.LiveFusion.Combinators.fromList
 
 
 -- | Prints code for an AST with line numbers to stdout.
@@ -662,11 +645,11 @@ tyArgTy _ = typeOf (undefined :: a)
 --test0 :: IO ()
 --test0 = print $ eval example0
 
-example1 :: ArrayAST Int
-example1 = Map (+1) $ Map (*2) (fl [1,2,3])
+--example1 :: ArrayAST Int
+--example1 = Map (+1) $ Map (*2) (fl [1,2,3])
 
-test1 :: IO ()
-test1 = print $ eval example1
+--test1 :: IO ()
+--test1 = print $ eval example1
 
 --example2 :: ArrayAST Int
 --example2 = ZipWith (*) (Map (+1) $ fl [1,2,3,4,5,6,7,8]) (ZipWith (+) (fl $ take 20 [-8,-7..]) (Map (\x->x*2+1) $ fl [1..8]))
