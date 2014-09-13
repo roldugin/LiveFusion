@@ -358,7 +358,7 @@ loopCode = pprint . loopDecs
 preamble :: String -> String
 preamble moduleName =
   "{-# LANGUAGE BangPatterns #-}                                           " ++\
-  "module " ++ moduleName ++ " where                                       " ++\
+  "module " ++ moduleName ++ " ( entry_" ++ moduleName ++ " ) where        " ++\
   "                                                                        " ++\
   "import Data.Vector.Unboxed as V                                         " ++\
   "import Data.Vector.Unboxed.Mutable as MV                                " ++\
