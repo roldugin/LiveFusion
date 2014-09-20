@@ -67,9 +67,10 @@ arrayVar = var "arr"
 resultVar :: Var
 resultVar = SimplVar "result"
 
+-- TODO These are all kinda hacky. We should use the Term language here.
 ltFn = SimplVar "(<)"
 plusFn = SimplVar "(+)"
-lengthFn = SimplVar "lengthArray"
+lengthFn = SimplVar "arrayLength"
 readFn = SimplVar "readArray"
 
 

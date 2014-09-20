@@ -377,8 +377,8 @@ preamble moduleName =
   "         Just v  -> v                                                   " ++\
   "         Nothing -> error \"Argument type mismatch\"                    " ++\
   "                                                                        " ++\
-  "lengthArray :: Unbox a => V.Vector a -> Int                             " ++\
-  "lengthArray = V.length                                                  " ++\
+  "arrayLength :: Unbox a => V.Vector a -> Int                             " ++\
+  "arrayLength = V.length                                                  " ++\
   "                                                                        " ++\
   "readArray :: V.Unbox a => V.Vector a -> Int -> a                        " ++\
   "readArray = V.unsafeIndex                                               " ++\
