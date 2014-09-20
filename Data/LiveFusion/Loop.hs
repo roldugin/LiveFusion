@@ -331,18 +331,18 @@ pprBlock (Block stmts mbfinal)
 
 
 pprStmt :: Stmt -> String
-pprStmt (Bind v e)     = "let " ++ pprVar v ++ " = " ++ pprExpr e
-pprStmt (Assign v e)   = pprVar v ++ " := " ++ pprExpr e
-pprStmt (Guard p l)    = "guard on " ++ pprExpr p ++ " | onFail: " ++ pprLabel l
-pprStmt (Case p l1 l2) = "if " ++ pprExpr p ++
-                         " then " ++ pprLabel l1 ++
-                         " else " ++ pprLabel l2
-pprStmt (Goto l)       = "goto " ++ pprLabel l
-pprStmt (NewArray arr n)        = pprVar arr ++ " = newArray " ++ pprExpr n
-pprStmt (ReadArray x arr i)     = pprVar x ++ " = " ++ pprVar arr ++ "[" ++ pprExpr i ++ "]"
-pprStmt (WriteArray arr i x)    = pprVar arr ++ "[" ++ pprExpr i ++ "] := " ++ pprExpr x
-pprStmt (SliceArray arr' arr n) = pprVar arr' ++ " = sliceArray " ++ pprVar arr ++ " " ++ pprExpr n
-pprStmt (Return e)     = "return " ++ pprExpr e
+pprStmt (Bind v e)     = "let" +-+ pprVar v +-+ "=" +-+ pprExpr e
+pprStmt (Assign v e)   = pprVar v +-+ ":=" +-+ pprExpr e
+pprStmt (Guard p l)    = "guard" +-+ pprExpr p +-+ "|" +-+ pprLabel l
+pprStmt (Case p l1 l2) = "if" +-+ pprExpr p ++
+                         " then" +-+ pprLabel l1 ++
+                         " else" +-+ pprLabel l2
+pprStmt (Goto l)       = "goto" +-+ pprLabel l
+pprStmt (NewArray arr n)        = pprVar arr +-+ "= newArray" +-+ pprExpr n
+pprStmt (ReadArray x arr i)     = pprVar x +-+ "= readArray" +-+ pprVar arr +-+ pprExpr i
+pprStmt (WriteArray arr i x)    = "writeArray" +-+ pprVar arr +-+ pprExpr i +-+ pprExpr x
+pprStmt (SliceArray arr' arr n) = pprVar arr' +-+ "= sliceArray" +-+ pprVar arr +-+ pprExpr n
+pprStmt (Return e)     = "return" +-+ pprExpr e
 pprStmt _              = "pprStmt: Unknown Statement"
 
 

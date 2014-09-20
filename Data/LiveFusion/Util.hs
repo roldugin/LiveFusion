@@ -4,16 +4,21 @@ module Data.LiveFusion.Util where
 import Data.List
 import Text.Printf
 
--- | Concatenate two strings with newline
+-- | Concatenate two strings with newline.
 infixr 5  ++\
 (++\) :: String -> String -> String
 (++\) l r = l ++ "\n" ++ r
 
 
--- | Concatenate two strings with semicolon and newline
+-- | Concatenate two strings with semicolon and newline.
 infixr 5  ++:\
 (++:\) :: String -> String -> String
 (++:\) str1 str2 = str1 ++ ";\n" ++ str2
+
+-- | Juxtapose two strings.
+infixr 5  +-+
+(+-+) :: String -> String -> String
+(+-+) = space
 
 
 -- | Juxtapose two strings.
@@ -26,12 +31,12 @@ paren :: String -> String
 paren s = "(" ++ s ++ ")"
 
 
--- | Indent each line the specified number of steps (2 spaces each)
+-- | Indent each line the specified number of steps (2 spaces each).
 indent :: Int -> String -> String
 indent n = unlines . map (replicate (n*2) ' ' ++) . lines
 
 
--- | Neatly index multiple lines
+-- | Neatly index multiple lines.
 indexed :: String -> String
 indexed = unlines . indexed' . lines
   where
