@@ -391,19 +391,19 @@ fuse env = fuse'
               --       or anything else important in the remainder of the body
               bodyStmts = [guard, resBind]
 
-              -- WRITE
+              -- YIELD
               -- WARNING: Assignment statement preceeds the array write stmt (added in the postprocess step)
               --          It it fine with the current semantics as the unupdated index will be used,
               --          however this is error prone and may not be true with code gens other than HsCodeGen.
               ixUpdate  = assignStmt ixVar (AppE (AppE (varE plusFn) (varE ixVar)) (LitE (1::Int)))  -- index step
-              writeStmts = [ixUpdate]
+              yieldStmts = [ixUpdate]
 
               -- LOOP
               loop      = setArrResultOnly uq
                         -- >$ addArg pVar (toDyn p)
                         $ addStmts initStmts (initLbl uq)
                         $ addStmts bodyStmts (bodyLbl uq)
-                        $ addStmts writeStmts (writeLbl uq)
+                        $ addStmts yieldStmts (yieldLbl uq)
                         -- Note that we aren't rebinding index since read/write indexes are not the same with Filter
                         $ rebindLengthVar uq arr_uq
                         -- $ addDefaultControlFlow uq
@@ -488,7 +488,7 @@ fuse env = fuse'
               -- GUARD_data (run for each element)
               -- Check if we reached the end of segment
               segendPred= (varE ltFn) `AppE` (varE jVar) `AppE` (varE seglenVar)
-              jGuard    = guardStmt segendPred (writeLbl segd_uq) -- jump out of the loop into segd loop
+              jGuard    = guardStmt segendPred (yieldLbl segd_uq) -- jump out of the loop into segd loop
               grdStmts_data = [jGuard]
               -- TODO
               -- The guard of block of data loop already has a guard with goto doneLbl_data.
@@ -565,7 +565,7 @@ rebindLengthVar nu old = addStmt stmt (initLbl nu)
 --   
 --   Since the index is likely to change it updates it in the guard.
 rebindIndexVar :: Unique -> Unique -> Loop -> Loop
-rebindIndexVar nu old = addStmt bndStmt (writeLbl nu)
+rebindIndexVar nu old = addStmt bndStmt (yieldLbl nu)
                       . addStmt bndStmt (doneLbl nu)
   where bndStmt = bindStmt (indexVar nu) (VarE $ indexVar old)
 

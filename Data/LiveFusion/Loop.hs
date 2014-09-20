@@ -378,18 +378,18 @@ addArg var arg loop = loop { loopArgs = loopArgs' }
 -- Several predefined labels
 --------------------------------------------------------------------------------
 
-initLbl, guardLbl, bodyLbl, writeLbl, bottomLbl, doneLbl :: Id -> Label
+initLbl, guardLbl, bodyLbl, yieldLbl, bottomLbl, doneLbl :: Id -> Label
 initLbl   = Label "init"
 guardLbl  = Label "guard"
 bodyLbl   = Label "body"
-writeLbl  = Label "write"
+yieldLbl  = Label "yield"
 bottomLbl = Label "bottom"
 doneLbl   = Label "done"
 
 -- | Add synonym labels for the basic predefined labels (init, guard, etc..)
 addDefaultSynonymLabels :: Id -> Id -> Loop -> Loop
 addDefaultSynonymLabels nu old loop
-  = foldl alias loop [initLbl, guardLbl, bodyLbl, writeLbl, bottomLbl, doneLbl]
+  = foldl alias loop [initLbl, guardLbl, bodyLbl, yieldLbl, bottomLbl, doneLbl]
   where
     alias loop lblMaker = addSynonymLabel (lblMaker nu) (lblMaker old) loop
 
@@ -400,8 +400,8 @@ addDefaultControlFlow uq loop
   = foldl addFinalGoto loop
   $ [ (initLbl   , guardLbl)  -- Init   -> Guard
     , (guardLbl  , bodyLbl)   -- Guard  -> Body
-    , (bodyLbl   , writeLbl)  -- Body   -> Write
-    , (writeLbl  , bottomLbl) -- Body   -> Write
+    , (bodyLbl   , yieldLbl)  -- Body   -> Yield
+    , (yieldLbl  , bottomLbl) -- Body   -> Yield
     , (bottomLbl , guardLbl)  -- Bottom -> Guard
     ]
   where
@@ -421,7 +421,7 @@ addDefaultControlFlow uq loop
 --   TODO: should probably not be neccessary
 touchDefaultBlocks :: Id -> Loop -> Loop
 touchDefaultBlocks uq loop
-  = foldl touch loop [initLbl, guardLbl, bodyLbl, writeLbl, bodyLbl, doneLbl]
+  = foldl touch loop [initLbl, guardLbl, bodyLbl, yieldLbl, bodyLbl, doneLbl]
   where
     touch loop mkLbl = updateBlock (mkLbl uq) id {-do nothing-} loop
 
@@ -665,7 +665,7 @@ insertResultArray loop
         elt   = eltVar    uq
 
         process = addStmt alloc (initLbl uq)
-              >>> addStmt write (writeLbl uq)
+              >>> addStmt write (yieldLbl uq)
               >>> addStmt slice (doneLbl uq)
               >>> addStmt ret   (doneLbl uq)
 
