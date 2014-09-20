@@ -6,6 +6,7 @@ import Data.LiveFusion.HsBackend.Types
 import Data.LiveFusion.Backend
 
 import Language.Haskell.TH as TH
+import Language.Haskell.TH.Syntax
 import System.IO.Unsafe ( unsafePerformIO )
 import Control.Monad
 
@@ -54,7 +55,7 @@ defaultImpl f = Impl { hs = f, th = Nothing }
 
 -------------------------------------------------------------------------------
 -- Prelude --------------------------------------------------------------------
--- TODO this stuff should really be hidden somewhere is HaBackend hierarchy
+-- TODO this stuff should really be hidden somewhere in HsBackend hierarchy
 
 -- Num ------------------------------------------------------------------------
 
@@ -70,6 +71,18 @@ signumImpl = Impl $signumTH (Just signumTH)
 
 fromIntegerImpl :: Num a => Integer -> Impl a
 fromIntegerImpl n = Impl (($fromIntegerTH) n) (Just [| $fromIntegerTH n |])
+
+
+-- Fractional -----------------------------------------------------------------
+
+divideImpl :: Fractional a => Impl (a -> a -> a)
+divideImpl = Impl { hs = $divideTH, th = Just divideTH }
+
+recipImpl :: Fractional a => Impl (a -> a)
+recipImpl = Impl { hs = $recipTH, th = Just recipTH }
+
+fromRationalImpl :: Fractional a => Rational -> Impl a
+fromRationalImpl n = Impl (($fromRationalTH) n) (Just [| $fromRationalTH n |])
 
 
 -- Eq -------------------------------------------------------------------------

@@ -6,6 +6,8 @@ module Data.LiveFusion.HsBackend.THDefinitions where
 --   all references to Exp are TemplateHaskell expressions defined in
 --   Language.Haskell.TH
 import Language.Haskell.TH as TH
+import Language.Haskell.TH.Syntax
+import Data.Ratio
 
 -------------------------------------------------------------------------------
 -- class (Eq a)
@@ -62,9 +64,21 @@ maxBoundTH = [| maxBound |]
 -------------------------------------------------------------------------------
 -- class Num a => Fractional a
 
-divideTH, recipTH {- fromRationalTH -} :: Q Exp
+divideTH, recipTH, fromRationalTH :: Q Exp
 divideTH = [| (/) |]
 recipTH = [| recip |]
+fromRationalTH = [| fromRational |]
+
+-- Must provide a Lift instance for type Rational = Ratio Integer
+instance Integral a => Lift (Ratio a) where
+  lift = liftRatio
+
+liftRatio :: Integral a => Ratio a -> Q Exp
+liftRatio r = return $ InfixE (Just numE) opE (Just denomE)
+  where
+  	opE    = VarE $ mkName "Data.Ratio.%"
+  	numE   = LitE $ IntegerL $ fromIntegral $ numerator r
+  	denomE = LitE $ IntegerL $ fromIntegral $ denominator r
 
 
 -------------------------------------------------------------------------------

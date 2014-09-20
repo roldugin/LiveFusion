@@ -364,8 +364,10 @@ preamble moduleName =
   "import Data.Vector.Unboxed.Mutable as MV                                " ++\
   "import Unsafe.Coerce                                                    " ++\
   "import Data.Dynamic                                                     " ++\
+  "import Data.Ratio                                                       " ++\
   "import GHC.Prim (Any)                                                   " ++\
   "import GHC.Num                                                          " ++\
+  "import GHC.Real                                                         " ++\  
   "import GHC.Classes                                                      " ++\
   "import Control.Monad.ST                                                 " ++\
   "import Control.Monad.Primitive                                          " ++\

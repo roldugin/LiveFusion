@@ -46,6 +46,28 @@ fromIntegerTerm :: IsNum a => Integer -> Term a
 fromIntegerTerm = code . fromIntegerImpl
 
 
+-- Fractional -----------------------------------------------------------------
+
+class (IsNum a, Fractional a, Typeable a, Show a) => IsFractional a
+
+instance IsFractional Float
+instance IsFractional Double
+
+instance IsFractional a => Fractional (Term a) where
+  (/) = divideTerm
+  recip = recipTerm
+  fromRational = fromRationalTerm
+
+divideTerm :: IsFractional a => Term a -> Term a -> Term a
+divideTerm x y = (code divideImpl) `app` x `app` y
+
+recipTerm :: IsFractional a => Term a -> Term a
+recipTerm x = (code recipImpl) `app` x
+
+fromRationalTerm :: IsFractional a => Rational -> Term a
+fromRationalTerm = code . fromRationalImpl
+
+
 -- Eq -------------------------------------------------------------------------
 
 class (Eq a, Typeable a, Show a) => IsEq a where
