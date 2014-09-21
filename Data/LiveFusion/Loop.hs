@@ -339,10 +339,10 @@ pprStmt (Case p l1 l2) = "if" +-+ pprExpr p ++
                          " then" +-+ pprLabel l1 ++
                          " else" +-+ pprLabel l2
 pprStmt (Goto l)       = "goto" +-+ pprLabel l
-pprStmt (NewArray arr n)        = pprVar arr +-+ "= newArray" +-+ pprExpr n
-pprStmt (ReadArray x arr i)     = pprVar x +-+ "= readArray" +-+ pprVar arr +-+ pprExpr i
+pprStmt (NewArray arr n)        = "let" +-+ pprVar arr +-+ "= newArray" +-+ pprExpr n
+pprStmt (ReadArray x arr i)     = "let" +-+ pprVar x +-+ "= readArray" +-+ pprVar arr +-+ pprExpr i
 pprStmt (WriteArray arr i x)    = "writeArray" +-+ pprVar arr +-+ pprExpr i +-+ pprExpr x
-pprStmt (SliceArray arr' arr n) = pprVar arr' +-+ "= sliceArray" +-+ pprVar arr +-+ pprExpr n
+pprStmt (SliceArray arr' arr n) = "let" +-+ pprVar arr' +-+ "= sliceArray" +-+ pprVar arr +-+ pprExpr n
 pprStmt (Return e)     = "return" +-+ pprExpr e
 pprStmt _              = "pprStmt: Unknown Statement"
 
