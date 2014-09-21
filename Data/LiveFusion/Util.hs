@@ -74,3 +74,27 @@ partition2 _ [] = []
 partition2 p xs
   = let (ls, rs) = breakIncl p xs
     in  ls : partition2 p rs
+
+
+-- | Borrowed from Language.Haskell.TH.Syntax
+thenCmp :: Ordering -> Ordering -> Ordering
+thenCmp EQ o2 = o2
+thenCmp o1 _  = o1
+
+
+-- | Pick ordering from a fixed order given by a list.
+--
+-- If the value is not in the list it's bigger.
+fixedCompare :: Ord a => [a] -> a -> a -> Ordering
+fixedCompare order x y = cmp mbx mby
+  where
+    cmp (Just xi) (Just yi) = compare xi yi
+    cmp _         Nothing   = LT
+    cmp Nothing   _         = GT
+    mbx = elemIndex x order
+    mby = elemIndex y order
+
+
+-- | Sort list on keys.
+sortOnKeysBy :: Ord k => (k -> k -> Ordering) -> [(k,v)] -> [(k,v)]
+sortOnKeysBy cmp = sortBy (\a b -> (fst a) `cmp` (fst b))

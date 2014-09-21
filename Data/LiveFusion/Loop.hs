@@ -318,11 +318,17 @@ setArrResultOnly i = unsetScalarResult
 --------------------------------------------------------------------------------
 
 pprBlockMap :: BlockMap -> String
-pprBlockMap = unlines . map pprOne . AMap.assocs
+pprBlockMap = unlines . map pprOne . sortOnKeysBy cmp . AMap.assocs
   where
-    pprOne (lbls, blk) = (pprLabels lbls) ++\
+    pprOne (lbls, blk) = (pprLabels lbls) ++
                          (indent 1 $ pprBlock blk)
+
     pprLabels = unlines . map (\l -> pprLabel l ++ ":") . Set.toList
+
+    cmp :: Set Label -> Set Label -> Ordering
+    cmp s1 s2 = let Label nm1 id1 = theOneLabel s1
+                    Label nm2 id2 = theOneLabel s2
+                in  compare id1 id2 `thenCmp` fixedCompare stdLabelNames nm1 nm2
 
 
 pprBlock :: Block -> String
@@ -376,13 +382,28 @@ addArg var arg loop = loop { loopArgs = loopArgs' }
 -- Several predefined labels
 --------------------------------------------------------------------------------
 
+initNm, guardNm, bodyNm, yieldNm, bottomNm, doneNm :: Name
+initNm   = "init"
+guardNm  = "guard"
+bodyNm   = "body"
+yieldNm  = "yield"
+bottomNm = "bottom"
+doneNm   = "done"
+
+
 initLbl, guardLbl, bodyLbl, yieldLbl, bottomLbl, doneLbl :: Id -> Label
-initLbl   = Label "init"
-guardLbl  = Label "guard"
-bodyLbl   = Label "body"
-yieldLbl  = Label "yield"
-bottomLbl = Label "bottom"
-doneLbl   = Label "done"
+initLbl   = Label initNm
+guardLbl  = Label guardNm
+bodyLbl   = Label bodyNm
+yieldLbl  = Label yieldNm
+bottomLbl = Label bottomNm
+doneLbl   = Label doneNm
+
+
+-- A list of standard label constructors
+stdLabelNames :: [Name]
+stdLabelNames = [initNm, guardNm, bodyNm, yieldNm, bottomNm, doneNm]
+
 
 -- | Add synonym labels for the basic predefined labels (init, guard, etc..)
 addDefaultSynonymLabels :: Id -> Id -> Loop -> Loop
