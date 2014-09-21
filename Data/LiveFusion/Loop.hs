@@ -334,10 +334,8 @@ pprBlock (Block stmts mbfinal)
 pprStmt :: Stmt -> String
 pprStmt (Bind v e)     = "let" +-+ pprVar v +-+ "=" +-+ pprExpr e
 pprStmt (Assign v e)   = pprVar v +-+ ":=" +-+ pprExpr e
-pprStmt (Guard p l)    = "guard" +-+ pprExpr p +-+ "|" +-+ pprLabel l
-pprStmt (Case p l1 l2) = "if" +-+ pprExpr p ++
-                         " then" +-+ pprLabel l1 ++
-                         " else" +-+ pprLabel l2
+pprStmt (Guard p l)    = "unless" +-+ pprExpr p +-+ "|" +-+ pprLabel l
+pprStmt (Case p l1 l2) = "if" +-+ pprExpr p +-+ "|" +-+ pprLabel l1 +-+ pprLabel l2
 pprStmt (Goto l)       = "goto" +-+ pprLabel l
 pprStmt (NewArray arr n)        = "let" +-+ pprVar arr +-+ "= newArray" +-+ pprExpr n
 pprStmt (ReadArray x arr i)     = "let" +-+ pprVar x +-+ "= readArray" +-+ pprVar arr +-+ pprExpr i
