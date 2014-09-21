@@ -6,6 +6,8 @@
 module Data.LiveFusion.Loop where
 
 import Data.LiveFusion.Scalar.HOAS as HOAS
+import qualified Data.LiveFusion.Scalar.Convert  as DeBruijn
+import qualified Data.LiveFusion.Scalar.DeBruijn as DeBruijn
 import Data.LiveFusion.Backend
 import Data.LiveFusion.Util
 import Data.LiveFusion.Types
@@ -788,8 +790,9 @@ pprExpr (VarE v)
   = pprVar v
 pprExpr (AppE f x)
   = (pprExpr f) `space` (pprExpr x)
-pprExpr (TermE _)
-  = "<Code>"
+pprExpr (TermE t)
+  -- TODO: Convert should not be here.
+  = paren $ DeBruijn.pprTerm $ DeBruijn.convert t
 pprExpr (LitE i)
   = show i
 
