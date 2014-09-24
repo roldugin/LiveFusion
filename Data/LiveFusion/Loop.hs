@@ -1,7 +1,12 @@
 {-# LANGUAGE GADTs, PatternGuards, StandaloneDeriving #-}
 
--- | Loop is an abstract representation of a loop computation.
---   It can be used to generate loop code.
+-- | Loop is a representation of a DSL with basic blocks
+--   and explicit control flow using goto's.
+--
+--   It can be used for things other than loops since there is
+--   no fixed loop structure but probably shouldn't.
+--
+--   The language offers statements for direct array manipulation.
 
 module Data.LiveFusion.Loop where
 
@@ -158,6 +163,25 @@ writeArrStmt = WriteArray
 sliceArrStmt = SliceArray
 
 
+-- | In the final loop we choose just one label out of all
+--   and use it everywhere where the same set of labels is used.
+--
+-- For example
+-- @
+-- body_3:
+-- body_2:
+--   elt_3 = f elt_2
+--   goto yield_3
+-- @
+-- gets rewritten to use the smallest label
+-- @
+-- body_3:
+-- body_2:
+--   elt_3 = f elt_2
+--   goto yield_2    <-- changed
+-- @
+
+
 rewriteStmtLabels :: [Set Label] -> Stmt -> Stmt
 rewriteStmtLabels lbls = go
   where
@@ -189,10 +213,10 @@ data Loop = Loop { -- | Loop entry block
                  }
 
 
--- | A collection of statememt blocks identified by labels akin to asm labels.
+-- | A collection of statement blocks identified by labels akin to ASM labels.
 --
 --   Each block can be identified by multiple labels. A new synonym label can
---   be added useing 'AliasMap.addSynonym'.
+--   be added using 'AliasMap.addSynonym'.
 --
 --   In the following example the block is both labelled 'init_0' and 'init_1'.
 -- @
@@ -316,7 +340,7 @@ setArrResultOnly i = unsetScalarResult
 
 
 
--- Pretty printing
+-- * Pretty printing
 --------------------------------------------------------------------------------
 
 pprBlockMap :: BlockMap -> String
@@ -381,7 +405,7 @@ addArg var arg loop = loop { loopArgs = loopArgs' }
   where loopArgs' = Map.insert var arg (loopArgs loop)
 
 
--- Several predefined labels
+-- * Several predefined labels
 --------------------------------------------------------------------------------
 
 initNm, guardNm, bodyNm, yieldNm, bottomNm, doneNm :: Name
@@ -402,7 +426,7 @@ bottomLbl = Label bottomNm
 doneLbl   = Label doneNm
 
 
--- A list of standard label constructors
+-- | A list of standard label constructors
 stdLabelNames :: [Name]
 stdLabelNames = [initNm, guardNm, bodyNm, yieldNm, bottomNm, doneNm]
 
@@ -422,7 +446,7 @@ addDefaultControlFlow uq loop
   $ [ (initLbl   , guardLbl)  -- Init   -> Guard
     , (guardLbl  , bodyLbl)   -- Guard  -> Body
     , (bodyLbl   , yieldLbl)  -- Body   -> Yield
-    , (yieldLbl  , bottomLbl) -- Body   -> Yield
+    , (yieldLbl  , bottomLbl) -- Yield  -> Bottom
     , (bottomLbl , guardLbl)  -- Bottom -> Guard
     ]
   where
@@ -439,7 +463,7 @@ addDefaultControlFlow uq loop
 --   This would usually happen in fresh loop. But for now we do it in pure
 --   generators and nested combinators.
 --
---   TODO: should probably not be neccessary
+--   TODO: should probably not be necessary
 touchDefaultBlocks :: Id -> Loop -> Loop
 touchDefaultBlocks uq loop
   = foldl touch loop [initLbl, guardLbl, bodyLbl, yieldLbl, bodyLbl, doneLbl]
@@ -450,7 +474,7 @@ touchDefaultBlocks uq loop
 --------------------------------------------------------------------------------
 
 
--- Environment
+-- * Environment
 --------------------------------------------------------------------------------
 
 -- | Per block environment which tracks the variables that the block
@@ -475,34 +499,9 @@ data Env = Env { -- | Variables expected to be in environment
 
 
 err_DECLARED = "[Loop DSL Error] Variable already declared in the environment: "
-err_NOTDECLARED = "[Loop DSL Error] Attmpt to assign to a variable that is not in scope: "
+err_NOTDECLARED = "[Loop DSL Error] Attempt to assign to a variable that is not in scope: "
 -- Maximum one assignment per block for now (TODO)
 err_ASSIGNED = "[Loop DSL Error] Variable already assigned to in this block: "
-
-{-
-instance Monoid Env where
-  mempty = Env [] [] []
-  mappend (Env ass1 decl1 envDirty1) (Env ass2 decl2 envDirty2) = Env ass decl envDirty
-    where
-      ass   = (ass1 \\ decl) `List.union` (ass2 \\ decl) -- TODO: Ugly. Forcibly disjoins vars
-                                                         -- assumed from prev loopBlockMap and
-                                                         -- declared in the current block
-      decl  = if null bad@(common [decl1, decl2, ass1, ass2])
-                 then decl1 ++ decl2
-                 else die err_DECLARED bad
-      envDirty = disjointCheck err_ASSIGNED envDirty1 envDirty2 -- TODO: probably also wanna check the var
-                                                       -- has been declared
-      disjointCheck errString xs ys
-            = let badVars = xs `intersect` ys
-              in  if List.null badVars
-                     then xs ++ ys
-                     else die errString badVars
-                          -- This is a crude way to fail, however there is no easy
-                          -- static way to check this. Besides, the DSL is internal
-                          -- to the library so it should not fail if everything is
-                          -- implemented right.
-      die errString badVars = error $ errString ++ show badVars
--}
 
 
 emptyEnv = Env [] [] [] []
@@ -542,7 +541,7 @@ assumeMany :: [Var] -> Env -> Env
 assumeMany vars env = foldr assume env vars
 
 
--- | Lists the block as as potentian next block to which control flow will be transferred
+-- | Lists the block as as potential next block to which control flow will be transferred
 adoptBlock :: Label -> Env -> Env
 adoptBlock lbl env
   = env { envNextBlocks = [lbl] `union` envNextBlocks env }
@@ -581,6 +580,7 @@ blockEnv blk = foldl (flip analyse) emptyEnv (blockStmts blk)
     analyse (Return v)     = assumeAllIn v
 
     assumeAllIn = assumeMany . varsE
+
 
 -- | Transitive environment assumptions
 --
@@ -652,16 +652,6 @@ postprocessLoop = rewriteLoopLabels
                 . insertResultArray
 
 
-{-
-insertControlFlow :: Loop -> Loop
-insertControlFlow
-  = addStmt (gotoStmt guardLbl)  initLbl    -- Init -> Guard
-  . addStmt (gotoStmt bodyLbl)   guardLbl   -- Guard -> Body
-  . addStmt (gotoStmt writeLbl) bodyLbl     -- Body -> Write
-  . addStmt (gotoStmt bottomLbl) writeLbl    -- Body -> Write
-  . addStmt (gotoStmt guardLbl)  bottomLbl  -- Bottom -> Guard
--}
-
 rewriteLoopLabels :: Loop -> Loop
 rewriteLoopLabels loop
   = loop { loopBlockMap = newBlockMap
@@ -700,7 +690,7 @@ insertResultArray loop
 --
 --   TODO: Explain this better, sketchy explanation follows.
 --         This happens because a block is aggregated from statements coming
---         from different places. So decalarations and control flow are interleaved.
+--         from different places. So declarations and control flow are interleaved.
 --         However, as soon as control flow occurs it may need all of the variables
 --         known to the block. This won't be possible if the declaration comes after
 --         the control transfer.
@@ -807,7 +797,3 @@ pprVar (SimplVar name) = pprName name
 
 pprId :: Id -> String
 pprId = show
-
--- | Create a new variable from a the given one
---prime :: Var -> Var
---prime (Var name ident) = Var $ name ++ "'"
