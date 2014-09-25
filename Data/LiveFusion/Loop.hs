@@ -100,6 +100,13 @@ addStmtsToBlock :: [Stmt] -> Block -> Block
 addStmtsToBlock stmts (Block stmts0 final0) = Block (stmts0 ++ stmts) final0
 
 
+-- | Replace all statements in the block.
+--
+-- Note that this keeps the final statement intact.
+setStmtsOfBlock :: [Stmt] -> Block -> Block
+setStmtsOfBlock stmts (Block _ final0) = Block stmts final0
+
+
 setBlockFinal :: Stmt -> Block -> Block
 setBlockFinal final (Block stmts _) = Block stmts (Just final)
 
@@ -285,9 +292,14 @@ addStmts :: [Stmt] -> Label -> Loop -> Loop
 addStmts stmts lbl = updateBlock lbl (addStmtsToBlock stmts)
 
 
--- | Replace all statements (including final) in a block with the specified ones.
+-- | Replace all statements (excluding final) in a block with the specified ones.
 replaceStmts :: [Stmt] -> Label -> Loop -> Loop
-replaceStmts stmts lbl = updateBlock lbl (const $ addStmtsToBlock stmts emptyBlock)
+replaceStmts stmts lbl = updateBlock lbl (setStmtsOfBlock stmts)
+
+
+-- | Removes all statements from block (including final)
+clearBlock :: Label -> Loop -> Loop
+clearBlock lbl = updateBlock lbl (const emptyBlock)
 
 
 setLoopEntry :: Label -> Loop -> Loop

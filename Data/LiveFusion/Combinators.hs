@@ -557,7 +557,7 @@ fuse env = fuse'
                         $ addStmts bodyStmts_uq   (bodyLbl uq)         -- different from bodyStmts_segd
                         $ touchBlock (bodyLbl uq)                      -- just being more explicit not really required
                         -- Data (arr_uq) stuff below
-                        $ addStmts grdStmts_data  (guardLbl arr_uq)
+                        $ replaceStmts grdStmts_data  (guardLbl arr_uq)    -- Ok, we should see if this breaks anything
                         $ addStmts botStmts_data  (bottomLbl arr_uq)
                         -- The usual stuff
                         $ rebindIndexAndLengthVars uq segd_uq
