@@ -100,6 +100,12 @@ data AST e where
            -> ArrayAST a
            -> ArrayAST a
 
+  Replicate_s
+           :: Elt a
+           => ArrayAST Int
+           -> ArrayAST a
+           -> ArrayAST a
+
   Manifest :: Elt a
            => V.Vector a
            -> ArrayAST a
@@ -187,6 +193,12 @@ data ASG e s where
             -> ArrayASG a s
             -> ArrayASG a s
 
+  Replicate_sG
+            :: Elt a
+            => ArrayASG Int s
+            -> ArrayASG a s
+            -> ArrayASG a s
+
   VarG      :: Typeable e
             => s
             -> ASG e s
@@ -243,6 +255,11 @@ instance Typeable e => MuRef (AST e) where
         = Scan_sG f
           <$> (VarG <$> ap z)
           <*> (VarG <$> ap segd)
+          <*> (VarG <$> ap arr)
+
+      mapDeRef' ap (Replicate_s segd arr)
+        = Replicate_sG
+          <$> (VarG <$> ap segd)
           <*> (VarG <$> ap arr)
 
       mapDeRef' ap (Manifest vec)
@@ -557,7 +574,7 @@ fuse env = fuse'
                         $ addStmts bodyStmts_uq   (bodyLbl uq)         -- different from bodyStmts_segd
                         $ touchBlock (bodyLbl uq)                      -- just being more explicit not really required
                         -- Data (arr_uq) stuff below
-                        $ replaceStmts grdStmts_data  (guardLbl arr_uq)    -- Ok, we should see if this breaks anything
+                        $ replaceStmts grdStmts_data  (guardLbl arr_uq) -- Ok, we should see if this breaks anything
                         $ addStmts botStmts_data  (bottomLbl arr_uq)
                         -- The usual stuff
                         $ rebindIndexAndLengthVars uq segd_uq
@@ -651,7 +668,9 @@ fuse env = fuse'
                         $ addSynonymLabel (doneLbl arr_uq) (doneLbl segd_uq)
                         $ segd_loop
           in (loop,uq)
- 
+
+
+
 
     -- | We store scalars in AST/ASG however, we're not yet clever about computing them.
     --   For not we assume that any scalar AST could only be constructed using Scalar constructor
