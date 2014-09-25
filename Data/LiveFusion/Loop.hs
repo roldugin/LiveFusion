@@ -243,7 +243,7 @@ theSynonymLabel lbls l = theOneLabel $ synonyms
   where
     synonyms = fromMaybe err
              $ find (l `Set.member`) lbls
-    err = error "theSynonymLabel: label not found in sets"
+    err = error $ "theSynonymLabel: label" +-+ show l +-+ "not found in sets"
 
 
 addSynonymLabel :: Label -> Label -> Loop -> Loop
@@ -417,6 +417,11 @@ bottomNm = "bottom"
 doneNm   = "done"
 
 
+-- | A list of standard label constructors
+stdLabelNames :: [Name]
+stdLabelNames = [initNm, guardNm, bodyNm, yieldNm, bottomNm, doneNm]
+
+
 initLbl, guardLbl, bodyLbl, yieldLbl, bottomLbl, doneLbl :: Id -> Label
 initLbl   = Label initNm
 guardLbl  = Label guardNm
@@ -426,17 +431,20 @@ bottomLbl = Label bottomNm
 doneLbl   = Label doneNm
 
 
--- | A list of standard label constructors
-stdLabelNames :: [Name]
-stdLabelNames = [initNm, guardNm, bodyNm, yieldNm, bottomNm, doneNm]
+mkLabels :: [Name] -> Id -> [Label]
+mkLabels names uq = map (\nm -> Label nm uq) names
 
 
 -- | Add synonym labels for the basic predefined labels (init, guard, etc..)
 addDefaultSynonymLabels :: Id -> Id -> Loop -> Loop
-addDefaultSynonymLabels nu old loop
-  = foldl alias loop [initLbl, guardLbl, bodyLbl, yieldLbl, bottomLbl, doneLbl]
+addDefaultSynonymLabels = addSynonymLabels stdLabelNames
+
+
+-- | Add synonym labels for a given list of labels.
+addSynonymLabels :: [Name] -> Id -> Id -> Loop -> Loop
+addSynonymLabels labels nu old loop = foldl alias loop labels
   where
-    alias loop lblMaker = addSynonymLabel (lblMaker nu) (lblMaker old) loop
+    alias loop lblName = addSynonymLabel (Label lblName nu) (Label lblName old) loop
 
 
 -- | Add control flow between some of the known blocks
@@ -465,10 +473,14 @@ addDefaultControlFlow uq loop
 --
 --   TODO: should probably not be necessary
 touchDefaultBlocks :: Id -> Loop -> Loop
-touchDefaultBlocks uq loop
-  = foldl touch loop [initLbl, guardLbl, bodyLbl, yieldLbl, bodyLbl, doneLbl]
+touchDefaultBlocks uq loop = foldl (flip touchBlock) loop stdLabels
   where
-    touch loop mkLbl = updateBlock (mkLbl uq) id {-do nothing-} loop
+    stdLabels = mkLabels stdLabelNames uq
+
+
+-- | Add an empty block to the loop. Does nothing if the block exists
+touchBlock :: Label -> Loop -> Loop
+touchBlock label loop = updateBlock label id {-do nothing-} loop
 
 
 --------------------------------------------------------------------------------

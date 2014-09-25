@@ -251,9 +251,10 @@ instance Typeable e => MuRef (AST e) where
       mapDeRef' ap (Scalar x)
         = pure $ ScalarG x
 
--- This is confusing at the moment: Var refers Unique that identifies the tree node we want to fetch
+
 getASTNode :: Typeable e => Map Unique (WrappedASG Unique) -> Unique -> Maybe (ASG e Unique)
 getASTNode m n = case m ! n of Wrap  e -> cast e
+
 
 recoverSharing :: Typeable e => AST e -> IO (Map Unique (WrappedASG Unique), Unique, Maybe (ASG e Unique))
 recoverSharing e = do
@@ -263,7 +264,10 @@ recoverSharing e = do
 {-# NOINLINE recoverSharing #-}
 
 
-
+-- | Don't look!
+--
+-- TODO: Introduce monadic interface to Loop.
+--       Split this function into ones taking care of individual combinators.
 fuse :: Typeable e => Map Unique (WrappedASG Unique) -> (ASG e Unique) -> Unique -> (Loop, Unique)
 fuse env = fuse'
   where
@@ -454,13 +458,33 @@ fuse env = fuse'
           in  (loop, uq)
 
 
-    fuse' (Fold_sG f z lens arr) uq
-        = let (arr_loop, arr_uq)   = fuse' arr uq
-              (lens_loop, lens_uq) = fuse' lens uq
-          in undefined
-
-
-    fuse' (Scan_sG f z segd arr) uq
+    -- fold_s is a segmented combinator that results in one element per segment.
+    -- Thus the yielding loop is the outer one.
+    -- So we could do
+    -- @
+    -- body_segd:
+    --   elt_segd = ...
+    --   goto guard_data
+    -- guard_data:
+    --   unless ... goto yield_segd
+    -- @
+    -- The problem is that there may be more combinators consuming the output of fold_s, e.g.:
+    -- @ map f $ fold_s f z segd arr @
+    -- The `map` will insert its body statements into the `body_segd`
+    -- where the result of folding a segment is not yet available.
+    --
+    -- The solution is to have a new `body_segd` block
+    -- which will be entered after the each segment is complete:
+    -- @
+    -- body_segd:
+    --   elt_segd = ...
+    --   goto guard_data
+    -- guard_data:
+    --   unless ... goto yield_segd
+    -- @
+    -- This could actually be the general solution for all combinators
+    -- but we will only apply it to segmented combinators for now.
+    fuse' (Fold_sG f z segd arr) uq
         = let (arr_loop, arr_uq)   = fuse' arr uq
               aVar      = eltVar arr_uq           -- an element from data array
 
@@ -481,25 +505,30 @@ fuse env = fuse'
 
               bodyStmts_segd = [jReset, accReset]
 
+              -- NEW BODY_uq separate from BODY_segd (Run post inner loop, see comment above)
+              -- not much here besides the reassigning acc to elt final goto,
+              -- but we did have to separate it from the previous body (segd_uq)
+              bVar      = eltVar uq              -- an element of the result array
+              bBind     = bindStmt bVar (VarE accVar)
+              bodyStmts_uq = [bBind]
+
 
               -- BOTTOM_segd (run after each segment)
-              -- Nothing here
+              -- Nothing new here
 
               -- GUARD_data (run for each element)
               -- Check if we reached the end of segment
               segendPred= (varE ltFn) `AppE` (varE jVar) `AppE` (varE seglenVar)
-              jGuard    = guardStmt segendPred (yieldLbl segd_uq) -- jump out of the loop into segd loop
+              -- jump out of the inner loop into the "second" body of segd loop
+              jGuard    = guardStmt segendPred (bodyLbl uq)
               grdStmts_data = [jGuard]
               -- TODO
               -- The guard of block of data loop already has a guard with goto doneLbl_data.
-              -- However, the preexisting guard is redundant (assuming segd is correct)
-              -- We may want to replace current guards with new ones
+              -- However, the pre-existing guard is redundant (assuming segd is correct)
+              -- We may want to completely replace current guards with new one.
+              -- In fact because that check precedes the other check it breaks combinators
+              -- which rely on yielding from the outer loop (like fold_s!)
 
-
-              -- BODY_data (run for each element)
-              bVar      = eltVar uq
-              bBind     = bindStmt bVar (VarE accVar) -- resulting element is current accumulator
-              bodyStmts_data = [bBind]
 
               -- BOTTOM_data (run for each element)
               -- Binding for `f`
@@ -520,14 +549,96 @@ fuse env = fuse'
                         $ setScalarResult accVar
                         -- Common stuff below
                         $ setFinalGoto (initLbl uq) (guardLbl segd_uq) -- start with outer (segd loop)
+                        -- Segd (segd_uq/uq) stuff below
+                        $ setFinalGoto (bodyLbl uq) (yieldLbl segd_uq)     -- goto yield from "second" body
+                        $ setFinalGoto (bodyLbl segd_uq) (guardLbl arr_uq) -- enter inner loop from "first" body
+                        $ addStmts initStmts_segd (initLbl segd_uq)
+                        $ addStmts bodyStmts_segd (bodyLbl segd_uq)
+                        $ addStmts bodyStmts_uq   (bodyLbl uq)         -- different from bodyStmts_segd
+                        $ touchBlock (bodyLbl uq)                      -- just being more explicit not really required
+                        -- Data (arr_uq) stuff below
+                        $ addStmts grdStmts_data  (guardLbl arr_uq)
+                        $ addStmts botStmts_data  (bottomLbl arr_uq)
+                        -- The usual stuff
+                        $ rebindIndexAndLengthVars uq segd_uq
+                        -- The new loop is the same rate as the segd one: unite uq/arr_uq.
+                        -- However! Don't unite the body block for the reasons outlined in the comment before the function.
+                        $ addSynonymLabels (List.delete bodyNm stdLabelNames) uq segd_uq
+                        $ Loop.append segd_loop
+                        -- Init and Done blocks can be safely merged
+                        $ addSynonymLabel (initLbl segd_uq) (initLbl arr_uq)
+                        $ addSynonymLabel (doneLbl segd_uq) (doneLbl arr_uq)
+                        $ arr_loop
+          in (loop,uq)
+
+    fuse' (Scan_sG f z segd arr) uq
+        = let (arr_loop, arr_uq)   = fuse' arr uq
+              aVar      = eltVar arr_uq           -- an element from data array
+ 
+              (segd_loop, segd_uq) = fuse' segd uq
+              seglenVar = eltVar segd_uq          -- an element from segd array
+ 
+              -- INIT_segd (run once)
+              zVar      = var "z" uq
+              zBind     = bindStmt zVar (TermE $ getScalar z uq)              
+              initStmts_segd = [zBind]
+ 
+              -- BODY_segd (run before each segment, and acts like init for the segment loop)
+              jVar      = var "j" uq  -- element counter that resets with every segment
+              jReset    = bindStmt jVar (LitE (0::Int))
+ 
+              accVar    = var "acc" uq                -- accumulator
+              accReset  = bindStmt accVar (VarE zVar) -- accumulator initialisation
+ 
+              bodyStmts_segd = [jReset, accReset]
+ 
+ 
+              -- BOTTOM_segd (run after each segment)
+              -- Nothing here
+ 
+              -- GUARD_data (run for each element)
+              -- Check if we reached the end of segment
+              segendPred= (varE ltFn) `AppE` (varE jVar) `AppE` (varE seglenVar)
+              jGuard    = guardStmt segendPred (yieldLbl segd_uq) -- jump out of the loop into segd loop
+              grdStmts_data = [jGuard]
+              -- TODO
+              -- The guard of block of data loop already has a guard with goto doneLbl_data.
+              -- However, the preexisting guard is redundant (assuming segd is correct)
+              -- We may want to replace current guards with new ones
+ 
+ 
+              -- BODY_data (run for each element)
+              bVar      = eltVar uq
+              bBind     = bindStmt bVar (VarE accVar) -- resulting element is current accumulator
+              bodyStmts_data = [bBind]
+ 
+              -- BOTTOM_data (run for each element)
+              -- Binding for `f`
+              fVar      = var "f" uq            -- name of function to apply
+              fBody     = TermE (lam2 f)        -- f's body in HOAS representation
+              fBind     = bindStmt fVar fBody   -- f = <HOAS.Term>  
+ 
+              fApp      = (varE fVar) `AppE` (varE accVar) `AppE` (varE aVar)
+              accUpdate = assignStmt accVar fApp
+ 
+              -- Increment in-segment counter
+              jUpdate  = assignStmt jVar ((varE plusFn) `AppE` (varE jVar) `AppE` (LitE (1::Int)))
+ 
+              botStmts_data = [fBind, accUpdate, jUpdate]
+ 
+              -- LOOP
+              loop      = setArrResult uq
+                        $ setScalarResult accVar
+                        -- Common stuff below
+                        $ setFinalGoto (initLbl uq) (guardLbl segd_uq) -- start with outer (segd loop)
                         -- Segd (segd_uq) stuff below
                         $ setFinalGoto (bodyLbl segd_uq) (guardLbl uq) -- enter inner loop
                         $ addStmts initStmts_segd (initLbl segd_uq)
                         $ addStmts bodyStmts_segd (bodyLbl segd_uq)
                         -- Data (arr_uq/uq) stuff below
-                        $ addStmts grdStmts_data  (guardLbl uq)
-                        $ addStmts bodyStmts_data (bodyLbl uq)
-                        $ addStmts botStmts_data  (bottomLbl uq)
+                        $ addStmts grdStmts_data  (guardLbl arr_uq)
+                        $ addStmts bodyStmts_data (bodyLbl arr_uq)
+                        $ addStmts botStmts_data  (bottomLbl arr_uq)
                         -- The usual stuff
                         $ rebindIndexAndLengthVars uq arr_uq
                         -- The data loop is the same rate as the current one: unite uq/arr_uq.
@@ -540,7 +651,7 @@ fuse env = fuse'
                         $ addSynonymLabel (doneLbl arr_uq) (doneLbl segd_uq)
                         $ segd_loop
           in (loop,uq)
-
+ 
 
     -- | We store scalars in AST/ASG however, we're not yet clever about computing them.
     --   For not we assume that any scalar AST could only be constructed using Scalar constructor
