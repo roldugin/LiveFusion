@@ -287,400 +287,346 @@ recoverSharing e = do
 --       Split this function into ones taking care of individual combinators.
 fuse :: Typeable e => Map Unique (WrappedASG Unique) -> (ASG e Unique) -> Unique -> (Loop, Unique)
 fuse env = fuse'
-  where
-    fuse' :: Typeable e => (ASG e Unique) -> Unique -> (Loop, Unique)
-    -- TODO: Unique id argument is essentially threaded through, can we abstract?
-    fuse' var@(VarG uq) _
-        = let ast = fromJust
-                  $ (getASTNode env uq) `asTypeOf` (Just var)
-          in  fuse' ast uq
+ where
+  fuse' :: Typeable e => (ASG e Unique) -> Unique -> (Loop, Unique)
 
-    fuse' (ManifestG vec) uq
-        = let arrVar    = arrayVar uq
-
-              -- INIT
-              lenVar    = lengthVar uq
-              lenBind   = bindStmt lenVar (AppE (varE lengthFn) (varE arrVar))
-              ixVar     = indexVar uq                     -- index variable
-              ixInit    = bindStmt ixVar (LitE (0::Int))  -- index initialization
-              initStmts = [ixInit, lenBind]
-
-              -- GUARD
-              predE     = AppE (AppE (varE ltFn) (varE ixVar)) (varE lenVar) -- boolean guard predicate
-              ixGuard   = guardStmt predE (doneLbl uq)
-              grdStmts  = [ixGuard]
-
-              -- BODY
-              aVar      = eltVar uq                            -- result of every read
-              aBind     = readArrStmt aVar arrVar (varE ixVar) -- read statement
-              bodyStmts = [aBind]
-
-              -- BOTTOM
-              ixUpdate  = assignStmt ixVar ((varE plusFn) `AppE` (varE ixVar) `AppE` (LitE (1::Int)))
-              botStmts  = [ixUpdate]
-
-              -- LOOP
-              loop      = setArrResultOnly uq
-                        $ addArg arrVar (toDyn vec)
-                        $ addStmts initStmts  (initLbl uq)
-                        $ addStmts grdStmts   (guardLbl uq)
-                        $ addStmts bodyStmts  (bodyLbl uq)
-                        $ addStmts botStmts   (bottomLbl uq)
-                        $ addDefaultControlFlow uq
-                        $ setLoopEntry (initLbl uq)
-                        $ touchDefaultBlocks uq
-                        $ Loop.empty
-          in  (loop, uq) -- TODO return a result that maps an element of array
-
-    fuse' (MapG f arr) uq
-        = let (arr_loop, arr_uq) = fuse' arr uq -- TODO: this uq means nothing
-              aVar      = eltVar arr_uq         -- element of source array
-
-              -- BODY
-
-              -- Binding for `f`
-              fVar      = var "f" uq            -- name of function to apply
-              fBody     = TermE (lam f)         -- f's body in HOAS representation
-              fBind     = bindStmt fVar fBody   -- f = <HOAS.Term>
-
-              -- Binding for result element `b`
-              bVar      = eltVar uq             -- resulting element variable
-              fApp      = AppE (varE fVar) (varE aVar) -- function application
-              bBind     = bindStmt bVar fApp    -- bind result
-
-              bodyStmts = [fBind, bBind]        -- body block has two statements
-
-              -- LOOP
-              loop      = setArrResultOnly uq
-                        -- >$ addArg fVar (toDyn f)
-                        $ addStmts bodyStmts (bodyLbl uq)
-                        $ rebindIndexAndLengthVars uq arr_uq
-                        -- $ addDefaultControlFlow uq
-                        $ addDefaultSynonymLabels uq arr_uq
-                        $ arr_loop
-          in  (loop, uq)
-
-    fuse' (ZipWithG f arr brr) uq
-        = let (arr_loop, arr_uq) = fuse' arr uq
-              (brr_loop, brr_uq) = fuse' brr uq
-              aVar      = eltVar arr_uq
-              bVar      = eltVar brr_uq
-
-              -- First separately unite uq/arr_uq and uq/brr_uq
-              -- so they know how to merge into one loop.
-              arr_loop' = addDefaultSynonymLabels uq arr_uq arr_loop
-              brr_loop' = addDefaultSynonymLabels uq brr_uq brr_loop
-              abrr_loop = arr_loop' `Loop.append` brr_loop'
-
-              -- BODY
-
-              -- Binding for `f`
-              fVar      = var "f" uq            -- name of function to apply
-              fBody     = TermE (lam2 f)        -- f's body in HOAS representation
-              fBind     = bindStmt fVar fBody   -- f = <HOAS.Term>              
-
-              cVar      = eltVar uq             -- resulting element variable
-              fApp      = (varE fVar) `AppE` (varE aVar) `AppE` (varE bVar) -- function application
-              cBind     = bindStmt cVar fApp    -- bind result
-
-              bodyStmts = [fBind,cBind]
-
-              -- LOOP
-              loop      = setArrResultOnly uq
-                 -- >       $ addArg fVar (toDyn f)
-                        $ addStmts bodyStmts (bodyLbl uq)
-                        $ rebindIndexAndLengthVars uq arr_uq -- be careful: arbitrary choice between a and b
-                        -- $ addDefaultControlFlow uq
-                        $ abrr_loop
-          in  (loop, uq)
-
-    fuse' (FilterG p arr) uq
-        = let (arr_loop, arr_uq) = fuse' arr uq
-              aVar      = eltVar arr_uq
-
-              -- INIT
-              ixVar     = indexVar uq                     -- writing index
-              ixInit    = bindStmt ixVar (LitE (0::Int))  -- index initialization
-              initStmts = [ixInit]
-
-              -- BODY
-              predExp   = AppE (TermE (lam p)) (varE aVar)
-              guard     = guardStmt predExp (bottomLbl uq)
-              resVar    = eltVar uq
-              resBind   = bindStmt resVar (VarE aVar)
-              -- NOTE: This will bug out if there are more guards
-              --       or anything else important in the remainder of the body
-              bodyStmts = [guard, resBind]
-
-              -- YIELD
-              -- WARNING: Assignment statement preceeds the array write stmt (added in the postprocess step)
-              --          It it fine with the current semantics as the unupdated index will be used,
-              --          however this is error prone and may not be true with code gens other than HsCodeGen.
-              ixUpdate  = assignStmt ixVar (AppE (AppE (varE plusFn) (varE ixVar)) (LitE (1::Int)))  -- index step
-              yieldStmts = [ixUpdate]
-
-              -- LOOP
-              loop      = setArrResultOnly uq
-                        -- >$ addArg pVar (toDyn p)
-                        $ addStmts initStmts (initLbl uq)
-                        $ addStmts bodyStmts (bodyLbl uq)
-                        $ addStmts yieldStmts (yieldLbl uq)
-                        -- Note that we aren't rebinding index since read/write indexes are not the same with Filter
-                        $ rebindLengthVar uq arr_uq
-                        -- $ addDefaultControlFlow uq
-                        $ addDefaultSynonymLabels uq arr_uq
-                        $ arr_loop
-          in  (loop, uq)
-
-    fuse' (ScanG f z arr) uq
-        = let (arr_loop, arr_uq) = fuse' arr uq
-              aVar      = eltVar arr_uq
- 
-              -- INIT
-              zVar      = var "z" uq
-              zBind     = bindStmt zVar (TermE $ getScalar z uq)
-
-              accVar    = var "acc" uq                -- accumulator
-              accInit   = bindStmt accVar (VarE zVar) -- accumulator initialization
-
-              initStmts = [zBind, accInit]
-
-              -- BODY
-              bVar      = eltVar uq
-              bBind     = bindStmt bVar (VarE accVar) -- resulting element is current accumulator
-              bodyStmts = [bBind]
-
-              -- BOTTOM
-
-              -- Binding for `f`
-              fVar      = var "f" uq            -- name of function to apply
-              fBody     = TermE (lam2 f)        -- f's body in HOAS representation
-              fBind     = bindStmt fVar fBody   -- f = <HOAS.Term>  
-
-              fApp      = (varE fVar) `AppE` (varE accVar) `AppE` (varE aVar)
-              accUpdate = assignStmt accVar fApp
-              botStmts  = [fBind, accUpdate]
-
-              -- LOOP
-              loop      = setArrResult uq
-                        $ setScalarResult accVar
-                        -- $ addArg zVar (toDyn z)
-                        $ addStmts initStmts (initLbl uq)
-                        $ addStmts bodyStmts (bodyLbl uq)
-                        $ addStmts botStmts  (bottomLbl uq)
-                        $ rebindIndexAndLengthVars uq arr_uq
-                        -- $ addDefaultControlFlow uq
-                        $ addDefaultSynonymLabels uq arr_uq
-                        $ arr_loop
-          in  (loop, uq)
+  -- TODO: Unique id argument is essentially threaded through, can we abstract?
+  fuse' var@(VarG uq) _ = fuse' ast uq
+   where
+    ast = fromJust
+        $ (getASTNode env uq) `asTypeOf` (Just var)
 
 
-    -- fold_s is a segmented combinator that results in one element per segment.
-    -- Thus the yielding loop is the outer one.
-    -- So we could do
-    -- @
-    -- body_segd:
-    --   elt_segd = ...
-    --   goto guard_data
-    -- guard_data:
-    --   unless ... goto yield_segd
-    -- @
-    -- The problem is that there may be more combinators consuming the output of fold_s, e.g.:
-    -- @ map f $ fold_s f z segd arr @
-    -- The `map` will insert its body statements into the `body_segd`
-    -- where the result of folding a segment is not yet available.
-    --
-    -- The solution is to have a new `body_segd` block
-    -- which will be entered after the each segment is complete:
-    -- @
-    -- body_segd:
-    --   elt_segd = ...
-    --   goto guard_data
-    -- guard_data:
-    --   unless ... goto yield_segd
-    -- @
-    -- This could actually be the general solution for all combinators
-    -- but we will only apply it to segmented combinators for now.
-    fuse' (Fold_sG f z segd arr) uq
-        = let (arr_loop, arr_uq)   = fuse' arr uq
-              aVar      = eltVar arr_uq           -- an element from data array
-
-              (segd_loop, segd_uq) = fuse' segd uq
-              seglenVar = eltVar segd_uq          -- an element from segd array
-
-              -- INIT_segd (run once)
-              zVar      = var "z" uq
-              zBind     = bindStmt zVar (TermE $ getScalar z uq)              
-              initStmts_segd = [zBind]
-
-              -- BODY_segd (run before each segment, and acts like init for the segment loop)
-              jVar      = var "j" uq  -- element counter that resets with every segment
-              jReset    = bindStmt jVar (LitE (0::Int))
-
-              accVar    = var "acc" uq                -- accumulator
-              accReset  = bindStmt accVar (VarE zVar) -- accumulator initialisation
-
-              bodyStmts_segd = [jReset, accReset]
-
-              -- NEW BODY_uq separate from BODY_segd (Run post inner loop, see comment above)
-              -- not much here besides the reassigning acc to elt final goto,
-              -- but we did have to separate it from the previous body (segd_uq)
-              bVar      = eltVar uq              -- an element of the result array
-              bBind     = bindStmt bVar (VarE accVar)
-              bodyStmts_uq = [bBind]
+  fuse' (ManifestG vec) uq = (loop,uq)
+   where
+    arrVar    = arrayVar uq
+    -- INIT
+    lenVar    = lengthVar uq
+    lenBind   = bindStmt lenVar (AppE (varE lengthFn) (varE arrVar))
+    ixVar     = indexVar uq                     -- index variable
+    ixInit    = bindStmt ixVar (LitE (0::Int))  -- index initialization
+    initStmts = [ixInit, lenBind]
+    -- GUARD
+    predE     = AppE (AppE (varE ltFn) (varE ixVar)) (varE lenVar) -- boolean guard predicate
+    ixGuard   = guardStmt predE (doneLbl uq)
+    grdStmts  = [ixGuard]
+    -- BODY
+    aVar      = eltVar uq                            -- result of every read
+    aBind     = readArrStmt aVar arrVar (varE ixVar) -- read statement
+    bodyStmts = [aBind]
+    -- BOTTOM
+    ixUpdate  = assignStmt ixVar ((varE plusFn) `AppE` (varE ixVar) `AppE` (LitE (1::Int)))
+    botStmts  = [ixUpdate]
+    -- LOOP
+    loop      = setArrResultOnly uq
+              $ addArg arrVar (toDyn vec)
+              $ addStmts initStmts  (initLbl uq)
+              $ addStmts grdStmts   (guardLbl uq)
+              $ addStmts bodyStmts  (bodyLbl uq)
+              $ addStmts botStmts   (bottomLbl uq)
+              $ addDefaultControlFlow uq
+              $ setLoopEntry (initLbl uq)
+              $ touchDefaultBlocks uq
+              $ Loop.empty
 
 
-              -- BOTTOM_segd (run after each segment)
-              -- Nothing new here
-
-              -- GUARD_data (run for each element)
-              -- Check if we reached the end of segment
-              segendPred= (varE ltFn) `AppE` (varE jVar) `AppE` (varE seglenVar)
-              -- jump out of the inner loop into the "second" body of segd loop
-              jGuard    = guardStmt segendPred (bodyLbl uq)
-              grdStmts_data = [jGuard]
-              -- TODO
-              -- The guard of block of data loop already has a guard with goto doneLbl_data.
-              -- However, the pre-existing guard is redundant (assuming segd is correct)
-              -- We may want to completely replace current guards with new one.
-              -- In fact because that check precedes the other check it breaks combinators
-              -- which rely on yielding from the outer loop (like fold_s!)
-
-
-              -- BOTTOM_data (run for each element)
-              -- Binding for `f`
-              fVar      = var "f" uq            -- name of function to apply
-              fBody     = TermE (lam2 f)        -- f's body in HOAS representation
-              fBind     = bindStmt fVar fBody   -- f = <HOAS.Term>  
-
-              fApp      = (varE fVar) `AppE` (varE accVar) `AppE` (varE aVar)
-              accUpdate = assignStmt accVar fApp
-
-              -- Increment in-segment counter
-              jUpdate  = assignStmt jVar ((varE plusFn) `AppE` (varE jVar) `AppE` (LitE (1::Int)))
-
-              botStmts_data = [fBind, accUpdate, jUpdate]
-
-              -- LOOP
-              loop      = setArrResult uq
-                        $ setScalarResult accVar
-                        -- Common stuff below
-                        $ setFinalGoto (initLbl uq) (guardLbl segd_uq) -- start with outer (segd loop)
-                        -- Segd (segd_uq/uq) stuff below
-                        $ setFinalGoto (bodyLbl uq) (yieldLbl segd_uq)     -- goto yield from "second" body
-                        $ setFinalGoto (bodyLbl segd_uq) (guardLbl arr_uq) -- enter inner loop from "first" body
-                        $ addStmts initStmts_segd (initLbl segd_uq)
-                        $ addStmts bodyStmts_segd (bodyLbl segd_uq)
-                        $ addStmts bodyStmts_uq   (bodyLbl uq)         -- different from bodyStmts_segd
-                        $ touchBlock (bodyLbl uq)                      -- just being more explicit not really required
-                        -- Data (arr_uq) stuff below
-                        $ replaceStmts grdStmts_data  (guardLbl arr_uq) -- Ok, we should see if this breaks anything
-                        $ addStmts botStmts_data  (bottomLbl arr_uq)
-                        -- The usual stuff
-                        $ rebindIndexAndLengthVars uq segd_uq
-                        -- The new loop is the same rate as the segd one: unite uq/arr_uq.
-                        -- However! Don't unite the body block for the reasons outlined in the comment before the function.
-                        $ addSynonymLabels (List.delete bodyNm stdLabelNames) uq segd_uq
-                        $ Loop.append segd_loop
-                        -- Init and Done blocks can be safely merged
-                        $ addSynonymLabel (initLbl segd_uq) (initLbl arr_uq)
-                        $ addSynonymLabel (doneLbl segd_uq) (doneLbl arr_uq)
-                        $ arr_loop
-          in (loop,uq)
-
-    fuse' (Scan_sG f z segd arr) uq
-        = let (arr_loop, arr_uq)   = fuse' arr uq
-              aVar      = eltVar arr_uq           -- an element from data array
- 
-              (segd_loop, segd_uq) = fuse' segd uq
-              seglenVar = eltVar segd_uq          -- an element from segd array
- 
-              -- INIT_segd (run once)
-              zVar      = var "z" uq
-              zBind     = bindStmt zVar (TermE $ getScalar z uq)              
-              initStmts_segd = [zBind]
- 
-              -- BODY_segd (run before each segment, and acts like init for the segment loop)
-              jVar      = var "j" uq  -- element counter that resets with every segment
-              jReset    = bindStmt jVar (LitE (0::Int))
- 
-              accVar    = var "acc" uq                -- accumulator
-              accReset  = bindStmt accVar (VarE zVar) -- accumulator initialisation
- 
-              bodyStmts_segd = [jReset, accReset]
- 
- 
-              -- BOTTOM_segd (run after each segment)
-              -- Nothing here
- 
-              -- GUARD_data (run for each element)
-              -- Check if we reached the end of segment
-              segendPred= (varE ltFn) `AppE` (varE jVar) `AppE` (varE seglenVar)
-              jGuard    = guardStmt segendPred (yieldLbl segd_uq) -- jump out of the loop into segd loop
-              grdStmts_data = [jGuard]
-              -- TODO
-              -- The guard of block of data loop already has a guard with goto doneLbl_data.
-              -- However, the preexisting guard is redundant (assuming segd is correct)
-              -- We may want to replace current guards with new ones
- 
- 
-              -- BODY_data (run for each element)
-              bVar      = eltVar uq
-              bBind     = bindStmt bVar (VarE accVar) -- resulting element is current accumulator
-              bodyStmts_data = [bBind]
- 
-              -- BOTTOM_data (run for each element)
-              -- Binding for `f`
-              fVar      = var "f" uq            -- name of function to apply
-              fBody     = TermE (lam2 f)        -- f's body in HOAS representation
-              fBind     = bindStmt fVar fBody   -- f = <HOAS.Term>  
- 
-              fApp      = (varE fVar) `AppE` (varE accVar) `AppE` (varE aVar)
-              accUpdate = assignStmt accVar fApp
- 
-              -- Increment in-segment counter
-              jUpdate  = assignStmt jVar ((varE plusFn) `AppE` (varE jVar) `AppE` (LitE (1::Int)))
- 
-              botStmts_data = [fBind, accUpdate, jUpdate]
- 
-              -- LOOP
-              loop      = setArrResult uq
-                        $ setScalarResult accVar
-                        -- Common stuff below
-                        $ setFinalGoto (initLbl uq) (guardLbl segd_uq) -- start with outer (segd loop)
-                        -- Segd (segd_uq) stuff below
-                        $ setFinalGoto (bodyLbl segd_uq) (guardLbl uq) -- enter inner loop
-                        $ addStmts initStmts_segd (initLbl segd_uq)
-                        $ addStmts bodyStmts_segd (bodyLbl segd_uq)
-                        -- Data (arr_uq/uq) stuff below
-                        $ addStmts grdStmts_data  (guardLbl arr_uq)
-                        $ addStmts bodyStmts_data (bodyLbl arr_uq)
-                        $ addStmts botStmts_data  (bottomLbl arr_uq)
-                        -- The usual stuff
-                        $ rebindIndexAndLengthVars uq arr_uq
-                        -- The data loop is the same rate as the current one: unite uq/arr_uq.
-                        -- This is not the case with segment descriptor loop, so just append it's blocks without merging.
-                        $ addDefaultSynonymLabels uq arr_uq
-                        -- Note: Order of appending matters since we want to enter arr_loop not segd_loop
-                        $ Loop.append arr_loop
-                        -- Init and Done blocks can be safely merged
-                        $ addSynonymLabel (initLbl arr_uq) (initLbl segd_uq)
-                        $ addSynonymLabel (doneLbl arr_uq) (doneLbl segd_uq)
-                        $ segd_loop
-          in (loop,uq)
+  fuse' (MapG f arr) uq = (loop,uq)
+   where
+    (arr_loop, arr_uq) = fuse' arr uq -- TODO: this uq means nothing
+    aVar      = eltVar arr_uq         -- element of source array
+    -- BODY
+    -- Binding for `f`
+    fVar      = var "f" uq            -- name of function to apply
+    fBody     = TermE (lam f)         -- f's body in HOAS representation
+    fBind     = bindStmt fVar fBody   -- f = <HOAS.Term>
+    -- Binding for result element `b`
+    bVar      = eltVar uq             -- resulting element variable
+    fApp      = AppE (varE fVar) (varE aVar) -- function application
+    bBind     = bindStmt bVar fApp    -- bind result
+    bodyStmts = [fBind, bBind]        -- body block has two statements
+    -- LOOP
+    loop      = setArrResultOnly uq
+              -- >$ addArg fVar (toDyn f)
+              $ addStmts bodyStmts (bodyLbl uq)
+              $ rebindIndexAndLengthVars uq arr_uq
+              -- $ addDefaultControlFlow uq
+              $ addDefaultSynonymLabels uq arr_uq
+              $ arr_loop
 
 
+  fuse' (ZipWithG f arr brr) uq = (loop,uq)
+   where
+    (arr_loop, arr_uq) = fuse' arr uq
+    (brr_loop, brr_uq) = fuse' brr uq
+    aVar      = eltVar arr_uq
+    bVar      = eltVar brr_uq
+    -- First separately unite uq/arr_uq and uq/brr_uq
+    -- so they know how to merge into one loop.
+    arr_loop' = addDefaultSynonymLabels uq arr_uq arr_loop
+    brr_loop' = addDefaultSynonymLabels uq brr_uq brr_loop
+    abrr_loop = arr_loop' `Loop.append` brr_loop'
+    -- BODY
+    -- Binding for `f`
+    fVar      = var "f" uq            -- name of function to apply
+    fBody     = TermE (lam2 f)        -- f's body in HOAS representation
+    fBind     = bindStmt fVar fBody   -- f = <HOAS.Term>              
+    cVar      = eltVar uq             -- resulting element variable
+    fApp      = (varE fVar) `AppE` (varE aVar) `AppE` (varE bVar) -- function application
+    cBind     = bindStmt cVar fApp    -- bind result
+    bodyStmts = [fBind,cBind]
+    -- LOOP
+    loop      = setArrResultOnly uq
+       -- >       $ addArg fVar (toDyn f)
+              $ addStmts bodyStmts (bodyLbl uq)
+              $ rebindIndexAndLengthVars uq arr_uq -- be careful: arbitrary choice between a and b
+              -- $ addDefaultControlFlow uq
+              $ abrr_loop
 
 
-    -- | We store scalars in AST/ASG however, we're not yet clever about computing them.
-    --   For not we assume that any scalar AST could only be constructed using Scalar constructor
-    getScalar :: (Typeable e, Elt e) => (ASG e Unique) -> Unique -> Term e
-    getScalar var@(VarG uq) _
-        = let ast = fromJust
-                  $ (getASTNode env uq) `asTypeOf` (Just var)
-          in  getScalar ast uq
-    getScalar (ScalarG term) _ = term
-    getScalar _ _ = error "getScalar: Failed scalar lookup. Make sure the scalar argument is constructed with Scalar AST constructor."
+  fuse' (FilterG p arr) uq = (loop,uq)
+   where
+    (arr_loop, arr_uq) = fuse' arr uq
+    aVar      = eltVar arr_uq
+    -- INIT
+    ixVar     = indexVar uq                     -- writing index
+    ixInit    = bindStmt ixVar (LitE (0::Int))  -- index initialization
+    initStmts = [ixInit]
+    -- BODY
+    predExp   = AppE (TermE (lam p)) (varE aVar)
+    guard     = guardStmt predExp (bottomLbl uq)
+    resVar    = eltVar uq
+    resBind   = bindStmt resVar (VarE aVar)
+    -- NOTE: This will bug out if there are more guards
+    --       or anything else important in the remainder of the body
+    bodyStmts = [guard, resBind]
+    -- YIELD
+    -- WARNING: Assignment statement preceeds the array write stmt (added in the postprocess step)
+    --          It it fine with the current semantics as the unupdated index will be used,
+    --          however this is error prone and may not be true with code gens other than HsCodeGen.
+    ixUpdate  = assignStmt ixVar (AppE (AppE (varE plusFn) (varE ixVar)) (LitE (1::Int)))  -- index step
+    yieldStmts = [ixUpdate]
+    -- LOOP
+    loop      = setArrResultOnly uq
+              -- >$ addArg pVar (toDyn p)
+              $ addStmts initStmts (initLbl uq)
+              $ addStmts bodyStmts (bodyLbl uq)
+              $ addStmts yieldStmts (yieldLbl uq)
+              -- Note that we aren't rebinding index since read/write indexes are not the same with Filter
+              $ rebindLengthVar uq arr_uq
+              -- $ addDefaultControlFlow uq
+              $ addDefaultSynonymLabels uq arr_uq
+              $ arr_loop
+
+
+  fuse' (ScanG f z arr) uq = (loop, uq)
+   where
+    (arr_loop, arr_uq) = fuse' arr uq
+    aVar      = eltVar arr_uq
+    -- INIT
+    zVar      = var "z" uq
+    zBind     = bindStmt zVar (TermE $ getScalar z uq)
+    accVar    = var "acc" uq                -- accumulator
+    accInit   = bindStmt accVar (VarE zVar) -- accumulator initialization
+    initStmts = [zBind, accInit]
+    -- BODY
+    bVar      = eltVar uq
+    bBind     = bindStmt bVar (VarE accVar) -- resulting element is current accumulator
+    bodyStmts = [bBind]
+    -- BOTTOM
+    -- Binding for `f`
+    fVar      = var "f" uq            -- name of function to apply
+    fBody     = TermE (lam2 f)        -- f's body in HOAS representation
+    fBind     = bindStmt fVar fBody   -- f = <HOAS.Term>  
+    fApp      = (varE fVar) `AppE` (varE accVar) `AppE` (varE aVar)
+    accUpdate = assignStmt accVar fApp
+    botStmts  = [fBind, accUpdate]
+    -- LOOP
+    loop      = setArrResult uq
+              $ setScalarResult accVar
+              -- $ addArg zVar (toDyn z)
+              $ addStmts initStmts (initLbl uq)
+              $ addStmts bodyStmts (bodyLbl uq)
+              $ addStmts botStmts  (bottomLbl uq)
+              $ rebindIndexAndLengthVars uq arr_uq
+              -- $ addDefaultControlFlow uq
+              $ addDefaultSynonymLabels uq arr_uq
+              $ arr_loop
+
+
+  -- fold_s is a segmented combinator that results in one element per segment.
+  -- Thus the yielding loop is the outer one.
+  -- So we could do
+  -- @
+  -- body_segd:
+  --   elt_segd = ...
+  --   goto guard_data
+  -- guard_data:
+  --   unless ... goto yield_segd
+  -- @
+  -- The problem is that there may be more combinators consuming the output of fold_s, e.g.:
+  -- @ map f $ fold_s f z segd arr @
+  -- The `map` will insert its body statements into the `body_segd`
+  -- where the result of folding a segment is not yet available.
+  --
+  -- The solution is to have a new `body_segd` block
+  -- which will be entered after the each segment is complete:
+  -- @
+  -- body_segd:
+  --   elt_segd = ...
+  --   goto guard_data
+  -- guard_data:
+  --   unless ... goto yield_segd
+  -- @
+  -- This could actually be the general solution for all combinators
+  -- but we will only apply it to segmented combinators for now.
+  fuse' (Fold_sG f z segd arr) uq = (loop, uq)
+   where
+    (arr_loop, arr_uq)   = fuse' arr uq
+    aVar      = eltVar arr_uq           -- an element from data array
+    (segd_loop, segd_uq) = fuse' segd uq
+    seglenVar = eltVar segd_uq          -- an element from segd array
+    -- INIT_segd (run once)
+    zVar      = var "z" uq
+    zBind     = bindStmt zVar (TermE $ getScalar z uq)              
+    initStmts_segd = [zBind]
+    -- BODY_segd (run before each segment, and acts like init for the segment loop)
+    jVar      = var "j" uq  -- element counter that resets with every segment
+    jReset    = bindStmt jVar (LitE (0::Int))
+    accVar    = var "acc" uq                -- accumulator
+    accReset  = bindStmt accVar (VarE zVar) -- accumulator initialisation
+    bodyStmts_segd = [jReset, accReset]
+    -- NEW BODY_uq separate from BODY_segd (Run post inner loop, see comment above)
+    -- not much here besides the reassigning acc to elt final goto,
+    -- but we did have to separate it from the previous body (segd_uq)
+    bVar      = eltVar uq              -- an element of the result array
+    bBind     = bindStmt bVar (VarE accVar)
+    bodyStmts_uq = [bBind]
+    -- BOTTOM_segd (run after each segment)
+    -- Nothing new here
+    -- GUARD_data (run for each element)
+    -- Check if we reached the end of segment
+    segendPred= (varE ltFn) `AppE` (varE jVar) `AppE` (varE seglenVar)
+    -- jump out of the inner loop into the "second" body of segd loop
+    jGuard    = guardStmt segendPred (bodyLbl uq)
+    grdStmts_data = [jGuard]
+    -- TODO
+    -- The guard of block of data loop already has a guard with goto doneLbl_data.
+    -- However, the pre-existing guard is redundant (assuming segd is correct)
+    -- We may want to completely replace current guards with new one.
+    -- In fact because that check precedes the other check it breaks combinators
+    -- which rely on yielding from the outer loop (like fold_s!)
+    -- BOTTOM_data (run for each element)
+    -- Binding for `f`
+    fVar      = var "f" uq            -- name of function to apply
+    fBody     = TermE (lam2 f)        -- f's body in HOAS representation
+    fBind     = bindStmt fVar fBody   -- f = <HOAS.Term>  
+    fApp      = (varE fVar) `AppE` (varE accVar) `AppE` (varE aVar)
+    accUpdate = assignStmt accVar fApp
+    -- Increment in-segment counter
+    jUpdate  = assignStmt jVar ((varE plusFn) `AppE` (varE jVar) `AppE` (LitE (1::Int)))
+    botStmts_data = [fBind, accUpdate, jUpdate]
+    -- LOOP
+    loop      = setArrResult uq
+              $ setScalarResult accVar
+              -- Common stuff below
+              $ setFinalGoto (initLbl uq) (guardLbl segd_uq) -- start with outer (segd loop)
+              -- Segd (segd_uq/uq) stuff below
+              $ setFinalGoto (bodyLbl uq) (yieldLbl segd_uq)     -- goto yield from "second" body
+              $ setFinalGoto (bodyLbl segd_uq) (guardLbl arr_uq) -- enter inner loop from "first" body
+              $ addStmts initStmts_segd (initLbl segd_uq)
+              $ addStmts bodyStmts_segd (bodyLbl segd_uq)
+              $ addStmts bodyStmts_uq   (bodyLbl uq)         -- different from bodyStmts_segd
+              $ touchBlock (bodyLbl uq)                      -- just being more explicit not really required
+              -- Data (arr_uq) stuff below
+              $ replaceStmts grdStmts_data  (guardLbl arr_uq) -- Ok, we should see if this breaks anything
+              $ addStmts botStmts_data  (bottomLbl arr_uq)
+              -- The usual stuff
+              $ rebindIndexAndLengthVars uq segd_uq
+              -- The new loop is the same rate as the segd one: unite uq/arr_uq.
+              -- However! Don't unite the body block for the reasons outlined in the comment before the function.
+              $ addSynonymLabels (List.delete bodyNm stdLabelNames) uq segd_uq
+              $ Loop.append segd_loop
+              -- Init and Done blocks can be safely merged
+              $ addSynonymLabel (initLbl segd_uq) (initLbl arr_uq)
+              $ addSynonymLabel (doneLbl segd_uq) (doneLbl arr_uq)
+              $ arr_loop
+
+
+  fuse' (Scan_sG f z segd arr) uq = (loop, uq)
+   where
+    (arr_loop, arr_uq)   = fuse' arr uq
+    aVar      = eltVar arr_uq           -- an element from data array
+    (segd_loop, segd_uq) = fuse' segd uq
+    seglenVar = eltVar segd_uq          -- an element from segd array
+    -- INIT_segd (run once)
+    zVar      = var "z" uq
+    zBind     = bindStmt zVar (TermE $ getScalar z uq)              
+    initStmts_segd = [zBind]
+    -- BODY_segd (run before each segment, and acts like init for the segment loop)
+    jVar      = var "j" uq  -- element counter that resets with every segment
+    jReset    = bindStmt jVar (LitE (0::Int))
+    accVar    = var "acc" uq                -- accumulator
+    accReset  = bindStmt accVar (VarE zVar) -- accumulator initialisation
+    bodyStmts_segd = [jReset, accReset]
+    -- BOTTOM_segd (run after each segment)
+    -- Nothing here
+    -- GUARD_data (run for each element)
+    -- Check if we reached the end of segment
+    segendPred= (varE ltFn) `AppE` (varE jVar) `AppE` (varE seglenVar)
+    jGuard    = guardStmt segendPred (yieldLbl segd_uq) -- jump out of the loop into segd loop
+    grdStmts_data = [jGuard]
+    -- TODO
+    -- The guard of block of data loop already has a guard with goto doneLbl_data.
+    -- However, the preexisting guard is redundant (assuming segd is correct)
+    -- We may want to replace current guards with new ones
+    -- BODY_data (run for each element)
+    bVar      = eltVar uq
+    bBind     = bindStmt bVar (VarE accVar) -- resulting element is current accumulator
+    bodyStmts_data = [bBind]
+    -- BOTTOM_data (run for each element)
+    -- Binding for `f`
+    fVar      = var "f" uq            -- name of function to apply
+    fBody     = TermE (lam2 f)        -- f's body in HOAS representation
+    fBind     = bindStmt fVar fBody   -- f = <HOAS.Term>  
+    fApp      = (varE fVar) `AppE` (varE accVar) `AppE` (varE aVar)
+    accUpdate = assignStmt accVar fApp
+    -- Increment in-segment counter
+    jUpdate  = assignStmt jVar ((varE plusFn) `AppE` (varE jVar) `AppE` (LitE (1::Int)))
+    botStmts_data = [fBind, accUpdate, jUpdate]
+    -- LOOP
+    loop      = setArrResult uq
+              $ setScalarResult accVar
+              -- Common stuff below
+              $ setFinalGoto (initLbl uq) (guardLbl segd_uq) -- start with outer (segd loop)
+              -- Segd (segd_uq) stuff below
+              $ setFinalGoto (bodyLbl segd_uq) (guardLbl uq) -- enter inner loop
+              $ addStmts initStmts_segd (initLbl segd_uq)
+              $ addStmts bodyStmts_segd (bodyLbl segd_uq)
+              -- Data (arr_uq/uq) stuff below
+              $ addStmts grdStmts_data  (guardLbl arr_uq)
+              $ addStmts bodyStmts_data (bodyLbl arr_uq)
+              $ addStmts botStmts_data  (bottomLbl arr_uq)
+              -- The usual stuff
+              $ rebindIndexAndLengthVars uq arr_uq
+              -- The data loop is the same rate as the current one: unite uq/arr_uq.
+              -- This is not the case with segment descriptor loop, so just append it's blocks without merging.
+              $ addDefaultSynonymLabels uq arr_uq
+              -- Note: Order of appending matters since we want to enter arr_loop not segd_loop
+              $ Loop.append arr_loop
+              -- Init and Done blocks can be safely merged
+              $ addSynonymLabel (initLbl arr_uq) (initLbl segd_uq)
+              $ addSynonymLabel (doneLbl arr_uq) (doneLbl segd_uq)
+              $ segd_loop
+
+
+  -- | We store scalars in AST/ASG however, we're not yet clever about computing them.
+  --   For not we assume that any scalar AST could only be constructed using Scalar constructor
+  getScalar :: (Typeable e, Elt e) => (ASG e Unique) -> Unique -> Term e
+  getScalar var@(VarG uq) _ = getScalar ast uq
+    where ast = fromJust
+              $ (getASTNode env uq) `asTypeOf` (Just var)
+  getScalar (ScalarG term) _ = term
+  getScalar _ _ = error "getScalar: Failed scalar lookup. Make sure the scalar argument is constructed with Scalar AST constructor."
 
      
 
