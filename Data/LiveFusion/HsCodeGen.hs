@@ -4,7 +4,7 @@
 
 module Data.LiveFusion.HsCodeGen where
 
-import Data.LiveFusion.HsBackend
+import Data.LiveFusion.HsBackend.Impl
 import Data.LiveFusion.HsBackend.Types
 
 import qualified Data.LiveFusion.Scalar.HOAS as HOAS

@@ -20,7 +20,7 @@ import System.Mem.StableName
 import Data.LiveFusion.Scalar.HOAS                                     (Level)
 import qualified Data.LiveFusion.Scalar.HOAS as HOAS
 
-import Data.LiveFusion.HsBackend
+import Data.LiveFusion.HsBackend.Impl
 
 -- Occurences maps
 -- ---------------

@@ -34,6 +34,7 @@ Library
 
     -- Haskell backend
     Data.LiveFusion.HsBackend
+    Data.LiveFusion.HsBackend.Impl
     Data.LiveFusion.HsBackend.Prelude
     Data.LiveFusion.HsBackend.THDefinitions
     Data.LiveFusion.HsBackend.Types

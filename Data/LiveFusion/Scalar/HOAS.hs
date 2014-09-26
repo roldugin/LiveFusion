@@ -5,7 +5,8 @@
 module Data.LiveFusion.Scalar.HOAS where
 
 import Data.LiveFusion.Backend
-import Data.LiveFusion.HsBackend -- TODO: For now hardcode Haskell backend in. Abstract over any backend later.
+-- TODO: For now hardcode Haskell backend in. Abstract over any backend later.
+import Data.LiveFusion.HsBackend.Impl
 
 import Data.Typeable
 import Text.Show.Functions

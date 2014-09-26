@@ -5,7 +5,7 @@
 module Data.LiveFusion.Scalar.DeBruijn where
 
 import Data.LiveFusion.Backend
-import Data.LiveFusion.HsBackend
+import Data.LiveFusion.HsBackend.Impl
 
 import System.IO.Unsafe
 

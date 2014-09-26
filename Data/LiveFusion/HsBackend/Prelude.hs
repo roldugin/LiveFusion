@@ -1,7 +1,7 @@
 module Data.LiveFusion.HsBackend.Prelude where
 
 import Data.LiveFusion.Scalar.HOAS
-import Data.LiveFusion.HsBackend
+import Data.LiveFusion.HsBackend.Impl
 import Data.LiveFusion.Types
 
 import Data.Typeable
