@@ -371,6 +371,7 @@ preamble moduleName =
   "import GHC.Classes                                                      " ++\
   "import Control.Monad.ST                                                 " ++\
   "import Control.Monad.Primitive                                          " ++\
+  "import Data.Tuple                                                       " ++\
   "                                                                        " ++\
   "fd :: Typeable a => Dynamic -> a                                        " ++\
   "fd d = case fromDynamic d of                                            " ++\
