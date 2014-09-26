@@ -53,6 +53,10 @@ defaultImpl :: a -> Impl a
 defaultImpl f = Impl { hs = f, th = Nothing } 
 
 
+mkImpl :: t -> Q TH.Exp -> Impl t
+mkImpl hs th = Impl hs (Just th)
+
+
 -------------------------------------------------------------------------------
 -- Prelude --------------------------------------------------------------------
 -- TODO this stuff should really be hidden somewhere in HsBackend hierarchy

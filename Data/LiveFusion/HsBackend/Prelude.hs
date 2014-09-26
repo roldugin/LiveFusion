@@ -2,6 +2,7 @@ module Data.LiveFusion.HsBackend.Prelude where
 
 import Data.LiveFusion.Scalar.HOAS
 import Data.LiveFusion.HsBackend
+import Data.LiveFusion.Types
 
 import Data.Typeable
 
@@ -114,3 +115,21 @@ geTerm x y = (code geImpl) `app` x `app` y
 minTerm, maxTerm :: IsOrd a => Term a -> Term a -> Term a
 minTerm x y = (code minImpl) `app` x `app` y
 maxTerm x y = (code maxImpl) `app` x `app` y
+
+-- * Lifting other Haskell functions (use mkImpl)
+
+liftT :: (Elt a, Elt b)
+      => Impl (a -> b)
+      -> Term a -> Term b
+liftT impl x = (code impl) `app` x
+
+liftT2 :: (Elt a, Elt b, Elt c)
+       => Impl (a -> b -> c)
+       -> Term a -> Term b -> Term c
+liftT2 impl x y = (code impl) `app` x `app` y
+
+liftT3 :: (Elt a, Elt b, Elt c, Elt d)
+       => Impl (a -> b -> c -> d)
+       -> Term a -> Term b -> Term c -> Term d
+liftT3 impl x y z = (code impl) `app` x `app` y `app` z
+
