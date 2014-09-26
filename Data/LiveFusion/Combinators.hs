@@ -102,7 +102,8 @@ data AST e where
 
   Replicate_s
            :: Elt a
-           => ArrayAST Int
+           => Int
+           -> ArrayAST Int
            -> ArrayAST a
            -> ArrayAST a
 
@@ -195,7 +196,8 @@ data ASG e s where
 
   Replicate_sG
             :: Elt a
-            => ArrayASG Int s
+            => Int
+            -> ArrayASG Int s
             -> ArrayASG a s
             -> ArrayASG a s
 
@@ -257,8 +259,8 @@ instance Typeable e => MuRef (AST e) where
           <*> (VarG <$> ap segd)
           <*> (VarG <$> ap arr)
 
-      mapDeRef' ap (Replicate_s segd arr)
-        = Replicate_sG
+      mapDeRef' ap (Replicate_s len segd arr)
+        = Replicate_sG len
           <$> (VarG <$> ap segd)
           <*> (VarG <$> ap arr)
 
@@ -552,21 +554,73 @@ fuse env = fuse'
               $ arr_loop
 
 
-  fuse' (Scan_sG f z segd arr) uq = (loop, uq)
+  fuse' (Scan_sG f z segd dat) uq = (loop, uq)
+   where
+    (data_loop, data_uq) = fuse' dat uq
+    aVar      = eltVar data_uq           -- an element from data dataay
+
+    (segd_loop, segd_uq) = fuse' segd uq
+
+    -- init_segd (run once)
+    zVar      = var "z" uq
+    zBind     = bindStmt zVar (TermE $ getScalar z uq)              
+    init_segd_stmts = [zBind]
+
+    -- body_segd (run before each segment, and acts like init for the segment loop)
+    accVar    = var "acc" uq                -- accumulator
+    accReset  = bindStmt accVar (VarE zVar) -- accumulator initialisation
+    body_segd_stmts = [accReset]
+
+    -- body_data (run for each element)
+    bVar      = eltVar uq
+    bBind     = bindStmt bVar (VarE accVar) -- resulting element is current accumulator
+    body_data_stmts = [bBind]
+
+    -- bottom_data (run for each element)
+    fApp      = fun2 f accVar aVar
+    accUpdate = assignStmt accVar fApp
+    bottom_data_stmts = [accUpdate]
+
+    -- some label names
+    init_segd   = initLbl segd_uq
+    body_segd   = bodyLbl segd_uq
+    body_data   = bodyLbl data_uq
+    bottom_data = bottomLbl data_uq
+
+    -- THE loop
+    loop      = setArrResult uq
+              $ setScalarResult accVar
+              -- Segd (segd_uq) stuff below
+              $ addStmts init_segd_stmts init_segd
+              $ addStmts body_segd_stmts body_segd
+              -- Data (data_uq/uq) stuff below
+              $ addStmts body_data_stmts body_data
+              $ addStmts bottom_data_stmts bottom_data
+              -- The usual stuff
+              $ rebindIndexAndLengthVars uq data_uq
+              $ nested_loops
+
+    nested_loops = nestLoops (segd_loop,segd_uq)
+                             (data_loop,data_uq)
+                             data_uq {- new rate: -}
+                             uq      {- new id: -}
+
+{-
+  -- Ok, we're gonna cheat here assuming that there will be some kind of segmented op which will introduce all the stuff
+  fuse' (Replicate_sG len segd arr) uq = (loop, uq)
    where
     (arr_loop, arr_uq)   = fuse' arr uq
     aVar      = eltVar arr_uq           -- an element from data array
+    ixVar     = indexVar arr_uq            -- index of data array
+
     (segd_loop, segd_uq) = fuse' segd uq
-    seglenVar = eltVar segd_uq          -- an element from segd array
-    -- INIT_segd (run once)
-    zVar      = var "z" uq
-    zBind     = bindStmt zVar (TermE $ getScalar z uq)              
-    initStmts_segd = [zBind]
+    nVar      = eltVar segd_uq          -- an element from segd array (repeat count)
+
     -- BODY_segd (run before each segment, and acts like init for the segment loop)
-    jVar      = var "j" uq  -- element counter that resets with every segment
-    jReset    = bindStmt jVar (LitE (0::Int))
-    accVar    = var "acc" uq                -- accumulator
-    accReset  = bindStmt accVar (VarE zVar) -- accumulator initialisation
+    plus = (+) :: Term Int -> Term Int -> Term Int
+    segendVar = var "end" uq  -- element counter that resets with every segment
+    segendSet = bindStmt segendVar (plus `AppE` (VarE ixVar) `AppE` (VarE nVar))
+
     bodyStmts_segd = [jReset, accReset]
     -- BOTTOM_segd (run after each segment)
     -- Nothing here
@@ -617,7 +671,7 @@ fuse env = fuse'
               $ addSynonymLabel (initLbl arr_uq) (initLbl segd_uq)
               $ addSynonymLabel (doneLbl arr_uq) (doneLbl segd_uq)
               $ segd_loop
-
+-}
 
   -- | We store scalars in AST/ASG however, we're not yet clever about computing them.
   --   For not we assume that any scalar AST could only be constructed using Scalar constructor
@@ -628,7 +682,76 @@ fuse env = fuse'
   getScalar (ScalarG term) _ = term
   getScalar _ _ = error "getScalar: Failed scalar lookup. Make sure the scalar argument is constructed with Scalar AST constructor."
 
-     
+
+fun2 :: (Elt a, Elt b, Elt c) => (Term a -> Term b -> Term c) -> Var -> Var -> Expr
+fun2 f x y = (TermE (lam2 f)) `AppE` (VarE x) `AppE` (VarE y)
+
+
+-- | Adds predefined control flow for nested loops.
+--
+-- The function takes loop/id of segd, loop/id of data,
+-- id of rate (usually either segd_uq or data_uq) and id of result loop.
+nestLoops :: (Loop,Unique) -> (Loop,Unique) -> Unique -> Unique -> Loop
+nestLoops (segd_loop, segd_uq) (data_loop, data_uq) rate_uq new_uq = loop
+ where
+  -- body_segd (run before each segment, and acts like init for the segment loop)
+  seglenVar = eltVar segd_uq
+  segendVar = var "end" new_uq  -- element counter that is updated for every segment
+  plus      = (+) :: Term Int -> Term Int -> Term Int
+  segendSet = bindStmt segendVar (fun2 plus ixVar seglenVar)
+  body_segd_stmts = [segendSet]
+
+  -- guard_data
+  ixVar = indexVar data_uq
+  lt = (<.) :: Term Int -> Term Int -> Term Bool
+  grd = guardStmt (fun2 lt ixVar segendVar) body_segd'
+  guard_data_stmts = [grd]
+  
+  -- some label redefinitions
+  init_      = initLbl new_uq
+
+  guard_segd = guardLbl segd_uq
+  body_segd  = bodyLbl segd_uq
+  body_segd' = bodyLbl new_uq
+
+  yield_segd = yieldLbl segd_uq
+  guard_data = guardLbl data_uq
+
+  -- THE loop
+  loop = id
+       -- Start with outer (segd) loop
+       $ setFinalGoto init_ guard_segd
+       -- Body of segd loop *before* going into inner loop
+       $ addStmts body_segd_stmts body_segd
+       $ setFinalGoto body_segd guard_data
+       -- Replace statements in guard of data (assuming segd is correct)
+       $ replaceStmts guard_data_stmts guard_data
+       $ loop'
+
+  -- Unite the new loop with whatever loop provides the correct rate.
+  loop'= case rate_uq of
+          -- If the new loop produces elements at the rate of segd
+          segd_uq ->
+            -- Body of segd loop *after* coming back from inner loop
+            setFinalGoto body_segd' yield_segd
+            -- Don't unite the body block! (see comment)
+            $ addSynonymLabels (List.delete bodyNm stdLabelNames) new_uq segd_uq
+            $ merged_loops
+
+          -- If the new loop produces elements at the rate of data
+          data_uq ->
+            addSynonymLabels stdLabelNames new_uq data_uq
+            $ merged_loops
+
+  merged_loops
+       -- Note: Order of appending matters given the order of synonyms
+       = Loop.append data_loop
+       $ addSynonymLabel (initLbl data_uq) (initLbl segd_uq)
+       $ addSynonymLabel (doneLbl data_uq) (doneLbl segd_uq)
+       $ segd_loop
+
+
+
 
 -- | Sets the upper bound of an array to be the same as that
 --   of another array.
