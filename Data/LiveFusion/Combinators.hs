@@ -559,73 +559,9 @@ fuse env = fuse'
                              data_uq {- new rate: -}
                              uq      {- new id: -}
 
-{-
-  -- Ok, we're gonna cheat here assuming that there will be some kind of segmented op which will introduce all the stuff
-  fuse' (Replicate_sG len segd arr) uq = (loop, uq)
-   where
-    (arr_loop, arr_uq)   = fuse' arr uq
-    aVar      = eltVar arr_uq           -- an element from data array
-    ixVar     = indexVar arr_uq            -- index of data array
 
-    (segd_loop, segd_uq) = fuse' segd uq
-    nVar      = eltVar segd_uq          -- an element from segd array (repeat count)
+  fuse' (Replicate_sG len segd arr) uq = undefined
 
-    -- BODY_segd (run before each segment, and acts like init for the segment loop)
-    plus = (+) :: Term Int -> Term Int -> Term Int
-    segendVar = var "end" uq  -- element counter that resets with every segment
-    segendSet = bindStmt segendVar (plus `AppE` (VarE ixVar) `AppE` (VarE nVar))
-
-    bodyStmts_segd = [jReset, accReset]
-    -- BOTTOM_segd (run after each segment)
-    -- Nothing here
-    -- GUARD_data (run for each element)
-    -- Check if we reached the end of segment
-    segendPred= (varE ltFn) `AppE` (varE jVar) `AppE` (varE seglenVar)
-    jGuard    = guardStmt segendPred (yieldLbl segd_uq) -- jump out of the loop into segd loop
-    grdStmts_data = [jGuard]
-    -- TODO
-    -- The guard of block of data loop already has a guard with goto doneLbl_data.
-    -- However, the preexisting guard is redundant (assuming segd is correct)
-    -- We may want to replace current guards with new ones
-    -- BODY_data (run for each element)
-    bVar      = eltVar uq
-    bBind     = bindStmt bVar (VarE accVar) -- resulting element is current accumulator
-    bodyStmts_data = [bBind]
-    -- BOTTOM_data (run for each element)
-    -- Binding for `f`
-    fVar      = var "f" uq            -- name of function to apply
-    fBody     = TermE (lam2 f)        -- f's body in HOAS representation
-    fBind     = bindStmt fVar fBody   -- f = <HOAS.Term>  
-    fApp      = (varE fVar) `AppE` (varE accVar) `AppE` (varE aVar)
-    accUpdate = assignStmt accVar fApp
-    -- Increment in-segment counter
-    jUpdate  = assignStmt jVar ((varE plusFn) `AppE` (varE jVar) `AppE` (LitE (1::Int)))
-    botStmts_data = [fBind, accUpdate, jUpdate]
-    -- LOOP
-    loop      = setArrResult uq
-              $ setScalarResult accVar
-              -- Common stuff below
-              $ setFinalGoto (initLbl uq) (guardLbl segd_uq) -- start with outer (segd loop)
-              -- Segd (segd_uq) stuff below
-              $ setFinalGoto (bodyLbl segd_uq) (guardLbl uq) -- enter inner loop
-              $ addStmts initStmts_segd (initLbl segd_uq)
-              $ addStmts bodyStmts_segd (bodyLbl segd_uq)
-              -- Data (arr_uq/uq) stuff below
-              $ addStmts grdStmts_data  (guardLbl arr_uq)
-              $ addStmts bodyStmts_data (bodyLbl arr_uq)
-              $ addStmts botStmts_data  (bottomLbl arr_uq)
-              -- The usual stuff
-              $ rebindIndexAndLengthVars uq arr_uq
-              -- The data loop is the same rate as the current one: unite uq/arr_uq.
-              -- This is not the case with segment descriptor loop, so just append it's blocks without merging.
-              $ addDefaultSynonymLabels uq arr_uq
-              -- Note: Order of appending matters since we want to enter arr_loop not segd_loop
-              $ Loop.append arr_loop
-              -- Init and Done blocks can be safely merged
-              $ addSynonymLabel (initLbl arr_uq) (initLbl segd_uq)
-              $ addSynonymLabel (doneLbl arr_uq) (doneLbl segd_uq)
-              $ segd_loop
--}
 
   -- | We store scalars in AST/ASG however, we're not yet clever about computing them.
   --   For not we assume that any scalar AST could only be constructed using Scalar constructor
