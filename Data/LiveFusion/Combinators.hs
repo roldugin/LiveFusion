@@ -454,33 +454,7 @@ fuse env = fuse'
               $ addDefaultSynonymLabels uq arr_uq
               $ arr_loop
 
-
-  -- fold_s is a segmented combinator that results in one element per segment.
-  -- Thus the yielding loop is the outer one.
-  -- So we could do
-  -- @
-  -- body_segd:
-  --   elt_segd = ...
-  --   goto guard_data
-  -- guard_data:
-  --   unless ... goto yield_segd
-  -- @
-  -- The problem is that there may be more combinators consuming the output of fold_s, e.g.:
-  -- @ map f $ fold_s f z segd arr @
-  -- The `map` will insert its body statements into the `body_segd`
-  -- where the result of folding a segment is not yet available.
-  --
-  -- The solution is to have a new `body_segd` block
-  -- which will be entered after the each segment is complete:
-  -- @
-  -- body_segd:
-  --   elt_segd = ...
-  --   goto guard_data
-  -- guard_data:
-  --   unless ... goto yield_segd
-  -- @
-  -- This could actually be the general solution for all combinators
-  -- but we will only apply it to segmented combinators for now.
+  -- See comment [1] at the bottom of the file
   fuse' (Fold_sG f z segd arr) uq = (loop, uq)
    where
     (data_loop, data_uq) = fuse' arr uq
@@ -671,6 +645,8 @@ fun2 f x y = (TermE (lam2 f)) `AppE` (VarE x) `AppE` (VarE y)
 --
 -- The function takes loop/id of segd, loop/id of data,
 -- id of rate (usually either segd_uq or data_uq) and id of result loop.
+--
+-- See comment [1] at the bottom of the file
 nestLoops :: (Loop,Unique) -> (Loop,Unique) -> Unique -> Unique -> Loop
 nestLoops (segd_loop, segd_uq) (data_loop, data_uq) rate_uq new_uq = loop
  where
@@ -882,4 +858,39 @@ testMZW = zipWith k (zipWith g xs fys) (zipWith h fys zs)
         xs = fl [1,2,3]
         ys = fl [4,5,6]
         zs = fl [7,8,9]
+-}
+
+{- [1]
+fold_s and other reductions run at the rate of the segment descriptor.
+This means they result in one element per segment.
+Thus the yielding loop is the outer one.
+So we could do
+@
+body_segd:
+  elt_segd = ...
+  goto guard_data
+guard_data:
+  unless ... goto yield_segd
+@
+
+The problem is that there may be more combinators consuming the output of fold_s, e.g.:
+
+@ map f $ fold_s f z segd arr @
+
+The `map` will insert its body statements into the `body_segd`
+where the result of folding a segment is not yet available.
+
+One possible solution is to have a new `body_segd'` block
+which will be entered after each segment is complete:
+@
+body_segd:
+  elt_segd = ...
+  goto guard_data
+guard_data:
+  unless ix < segend | goto body_segd'
+body_segd':
+  ...
+@
+This could actually be the general solution for all combinators
+but we will only apply it to segmented combinators with segd output rates for now.
 -}
