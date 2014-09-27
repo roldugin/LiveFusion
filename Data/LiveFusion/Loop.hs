@@ -46,9 +46,8 @@ type Name  = String
 type Arg   = Dynamic
 
 
-
--- Variables
--- ----------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+-- * Variables
 
 data Var = IdVar Name Id
          | SimplVar Name
@@ -143,8 +142,8 @@ rewriteBlockLabels lbls (Block stmts final) = Block stmts' final'
     final' = rewriteStmtLabels lbls <$> final
 
 
--- Labels
 -------------------------------------------------------------------------------
+-- * Labels
 
 data Label = Label Name Id
   deriving ( Eq, Ord )
@@ -153,9 +152,8 @@ instance Show Label where
   show (Label nm i) = nm ++ "_" ++ show i
 
 
-
--- Statements
 -------------------------------------------------------------------------------
+-- * Statements
 
 data Stmt = Bind   Var Expr
           | Assign Var Expr
@@ -220,8 +218,9 @@ rewriteStmtLabels lbls = go
     go (Goto l)       = Goto (rw l)
     go _stmt          = _stmt
 
--- Loops
+
 -------------------------------------------------------------------------------
+-- * Loops
 
 data Loop = Loop { -- | Loop entry block
                    loopEntry        :: Maybe Label
