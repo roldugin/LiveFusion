@@ -301,35 +301,28 @@ fuse env = fuse'
 
   fuse' (ManifestG vec) uq = (loop,uq)
    where
-    arrVar    = arrayVar uq
-    -- INIT
-    lenVar    = lengthVar uq
+    arrVar    = arrayVar uq   -- array variable 'arr_uq'
+    ixVar     = indexVar uq   -- index variable 'ix_uq'
+    lenVar    = lengthVar uq  -- length variable 'len_uq'
+    aVar      = eltVar uq     -- element variable 'elt_uq' (result of every read)
+
+    -- init
     lenBind   = bindStmt lenVar (AppE (varE lengthFn) (varE arrVar))
-    ixVar     = indexVar uq                     -- index variable
-    ixInit    = bindStmt ixVar (LitE (0::Int))  -- index initialization
-    initStmts = [ixInit, lenBind]
-    -- GUARD
-    predE     = AppE (AppE (varE ltFn) (varE ixVar)) (varE lenVar) -- boolean guard predicate
-    ixGuard   = guardStmt predE (doneLbl uq)
-    grdStmts  = [ixGuard]
-    -- BODY
-    aVar      = eltVar uq                            -- result of every read
-    aBind     = readArrStmt aVar arrVar (varE ixVar) -- read statement
-    bodyStmts = [aBind]
-    -- BOTTOM
-    ixUpdate  = assignStmt ixVar ((varE plusFn) `AppE` (varE ixVar) `AppE` (LitE (1::Int)))
-    botStmts  = [ixUpdate]
-    -- LOOP
-    loop      = setArrResultOnly uq
-              $ addArg arrVar (toDyn vec)
-              $ addStmts initStmts  (initLbl uq)
-              $ addStmts grdStmts   (guardLbl uq)
-              $ addStmts bodyStmts  (bodyLbl uq)
-              $ addStmts botStmts   (bottomLbl uq)
-              $ addDefaultControlFlow uq
-              $ setLoopEntry (initLbl uq)
-              $ touchDefaultBlocks uq
-              $ Loop.empty
+    init_stmts = [lenBind]
+
+    -- body
+    readStmt  = readArrStmt aVar arrVar (varE ixVar)  -- read statement
+    body_stmts = [readStmt]
+
+    -- labels
+    init_     = initLbl uq
+    body_     = bodyLbl uq
+
+    -- THE loop
+    loop      = addArg   arrVar (toDyn vec)
+              $ addStmts init_stmts init_
+              $ addStmts body_stmts body_
+              $ defaultLoop uq
 
 
   fuse' (MapG f arr) uq = (loop,uq)

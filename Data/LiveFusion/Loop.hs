@@ -775,6 +775,14 @@ empty :: Loop
 empty = mempty
 
 
+-- | A loop with the default set of basic blocks and control flow.
+defaultLoop :: Id -> Loop
+defaultLoop uq = addDefaultControlFlow uq
+               $ setLoopEntry (initLbl uq)
+               $ touchDefaultBlocks uq
+               $ empty
+
+
 appendLoopBlockMap :: Block -> Block -> Block
 appendLoopBlockMap (Block stmts1 final1) (Block stmts2 final2)
   = Block (stmts1 ++ stmts2) (final1 <|> final2)
