@@ -22,6 +22,7 @@ import qualified Data.LiveFusion.AliasMap as AMap
 -- We should not be importing any backend specific stuff, but for now we hardcoded Exp to be depend on THElt
 -- That is, elements that can be generated in TemplateHaskell
 import Data.LiveFusion.HsBackend.Types
+import Data.LiveFusion.HsBackend.Prelude
 
 import Data.Map ( Map )
 import qualified Data.Map as Map
@@ -81,9 +82,29 @@ lengthFn = SimplVar "arrayLength"
 readFn = SimplVar "readArray"
 
 
-
--- Blocks
 -------------------------------------------------------------------------------
+-- * Helper functions
+
+-- This can go as soon as we make internal scalar language fully typed
+plusInt :: Term Int -> Term Int -> Term Int
+plusInt = plusTerm
+
+
+ltInt :: Term Int -> Term Int -> Term Bool
+ltInt = ltTerm
+
+
+incStmt :: Var -> Stmt
+incStmt v = assignStmt v incExpr
+  where
+    incExpr  = plusIntE `AppE` vE `AppE` oneE
+    plusIntE = TermE (lam2 plusInt)
+    vE       = varE v
+    oneE     = TermE (1 :: Term Int)
+
+
+-------------------------------------------------------------------------------
+-- * Blocks
 
 data Block = Block [Stmt] (Maybe Stmt)
 

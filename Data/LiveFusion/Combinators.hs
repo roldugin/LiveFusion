@@ -577,6 +577,30 @@ fun2 :: (Elt a, Elt b, Elt c) => (Term a -> Term b -> Term c) -> Var -> Var -> E
 fun2 f x y = (TermE (lam2 f)) `AppE` (VarE x) `AppE` (VarE y)
 
 
+-- | Add sequential loop statements to an existing loop.
+--
+-- Given a unique 'uq' of a loop it will insert the following statements:
+-- @
+--   guard:
+--     unless ix_uq < len_uq | done_uq
+--   bottom:
+--     ix_uq := ix_uq + 1
+-- @
+iterate :: Unique -> Loop -> Loop
+iterate uq = addStmt indexTest guard
+           . addStmt indexInc  bottom
+  where
+    ix     = indexVar uq
+    len    = lengthVar uq
+
+    indexTest = guardStmt (fun2 ltInt ix len) done
+    indexInc  = incStmt ix
+
+    guard  = guardLbl uq
+    bottom = bottomLbl uq
+    done   = doneLbl uq
+
+
 -- | Adds predefined control flow for nested loops.
 --
 -- The function takes loop/id of segd, loop/id of data,
@@ -589,8 +613,7 @@ nestLoops (segd_loop, segd_uq) (data_loop, data_uq) rate_uq new_uq = loop
   -- body_segd (run before each segment, and acts like init for the segment loop)
   seglenVar = eltVar segd_uq
   segendVar = var "end" new_uq  -- element counter that is updated for every segment
-  plus      = (+) :: Term Int -> Term Int -> Term Int
-  segendSet = bindStmt segendVar (fun2 plus ixVar seglenVar)
+  segendSet = bindStmt segendVar (fun2 plusInt ixVar seglenVar)
   body_segd_stmts = [segendSet]
 
   -- guard_data
