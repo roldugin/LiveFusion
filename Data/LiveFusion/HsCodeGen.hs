@@ -132,6 +132,17 @@ cgStmt _ _ (WriteArray arr i x)
         x_th   = cgExp x
     in  thStmt
 
+cgStmt _ _ (ArrayLength x arr)
+  = let thStmt = LetS [ValD lhs (NormalB rhs) [{-no where clause-}]]
+
+        lhs = BangP $ VarP $ cgVarName x
+        rhs = TH.AppE arrayLengthFn arr_th
+
+        arrayLengthFn = TH.VarE $ mkName "arrayLength"
+        arr_th = cgVar arr
+
+    in  thStmt
+
 cgStmt _ _ (SliceArray arr' arr n)
   = let thStmt = BindS (BangP $ VarP $ cgVarName arr')
                        (TH.AppE (TH.AppE sliceArrayFn arr_th) n_th)

@@ -31,6 +31,8 @@ import Data.Maybe
 import Data.Set ( Set )
 import qualified Data.Set as Set
 
+-- TODO: We should not be relying on an Int type synonym from some package.
+import Data.Reify.Graph ( Unique )
 import Data.Dynamic
 import Data.List as List
 import Data.Monoid
@@ -39,7 +41,7 @@ import Control.Monad
 import Control.Category ( (>>>) )
 
 
-type Id = Int
+type Id = Unique
 
 type Name  = String
 
@@ -162,19 +164,22 @@ data Stmt = Bind   Var Expr
           | Goto   Label
           | Return Expr
           -- Array statements.
-          -- They are here because they are stateful operations.
+          -- They are here because some of them are stateful operations
+          -- and they are backend specific.
           -- Perhaps there is a cleaner way to do this.
-          | NewArray   Var  {- Array name -}
-                       Expr {- Array length -}
-          | ReadArray  Var  {- Variable to read into -}
-                       Var  {- Array name -}
-                       Expr {- Index -}
-          | WriteArray Var  {- Array name -}
-                       Expr {- Index -}
-                       Expr {- Element -}
-          | SliceArray Var  {- New array name (TODO: ugly) -}
-                       Var  {- Array name -}
-                       Expr {- Array length -}
+          | NewArray    Var  {- Array name -}
+                        Expr {- Array length -}
+          | ReadArray   Var  {- Variable to read into -}
+                        Var  {- Array name -}
+                        Expr {- Index -}
+          | WriteArray  Var  {- Array name -}
+                        Expr {- Index -}
+                        Expr {- Element -}
+          | ArrayLength Var  {- Variable to bind to -}
+                        Var  {- Array name -}
+          | SliceArray  Var  {- New array name (TODO: ugly) -}
+                        Var  {- Array name -}
+                        Expr {- Array length -}
 
 
 bindStmt     = Bind
@@ -186,6 +191,7 @@ returnStmt   = Return
 newArrStmt   = NewArray
 readArrStmt  = ReadArray
 writeArrStmt = WriteArray
+arrLenStmt   = ArrayLength
 sliceArrStmt = SliceArray
 
 
@@ -404,6 +410,7 @@ pprStmt (Goto l)       = "goto" +-+ pprLabel l
 pprStmt (NewArray arr n)        = "let" +-+ pprVar arr +-+ "= newArray" +-+ pprExpr n
 pprStmt (ReadArray x arr i)     = "let" +-+ pprVar x +-+ "= readArray" +-+ pprVar arr +-+ pprExpr i
 pprStmt (WriteArray arr i x)    = "writeArray" +-+ pprVar arr +-+ pprExpr i +-+ pprExpr x
+pprStmt (ArrayLength i arr)     = "let" +-+ pprVar i +-+ "= arrayLength" +-+ pprVar arr
 pprStmt (SliceArray arr' arr n) = "let" +-+ pprVar arr' +-+ "= sliceArray" +-+ pprVar arr +-+ pprExpr n
 pprStmt (Return e)     = "return" +-+ pprExpr e
 pprStmt _              = "pprStmt: Unknown Statement"
@@ -620,6 +627,7 @@ blockEnv blk = foldl (flip analyse) emptyEnv (blockStmts blk)
     analyse (NewArray arr n)        = assumeAllIn n >>> declare arr
     analyse (ReadArray x arr i)     = assume arr >>> assumeAllIn i >>> declare x
     analyse (WriteArray arr i x)    = assume arr >>> assumeAllIn i >>> assumeAllIn x
+    analyse (ArrayLength x arr)     = assume arr >>> declare x
     analyse (SliceArray arr' arr n) = assume arr >>> assumeAllIn n >>> declare arr'
     analyse (Return v)     = assumeAllIn v
 
@@ -691,9 +699,41 @@ extendedEnv loop = purgeBlockLocalVars
 
 -- | Reduces the minimal set of labels
 postprocessLoop :: Loop -> Loop
-postprocessLoop = rewriteLoopLabels
-                . reorderDecls
-                . insertResultArray
+postprocessLoop loop = rewriteLoopLabels
+                     $ reorderDecls
+                     $ writeResultArray uq
+                     $ iterateLoop uq
+                     $ loop
+  where
+    uq  = fromMaybe err (loopArrResult loop)
+    err = error "postprocessLoop: No array result set"
+
+
+-- | Add sequential loop statements to an existing loop.
+--
+-- Given a unique 'uq' of a loop it will insert the following statements:
+-- @
+--   guard:
+--     unless ix_uq < len_uq | done_uq
+--   bottom:
+--     ix_uq := ix_uq + 1
+-- @
+iterateLoop :: Unique -> Loop -> Loop
+iterateLoop uq = addStmt indexTest guard_
+               . addStmt indexInc  bottom_
+               . addStmt indexBind init_
+  where
+    ix     = indexVar uq
+    len    = lengthVar uq
+
+    indexBind = bindStmt ix (TermE (0 :: Term Int))
+    indexTest = guardStmt (fun2 ltInt ix len) done_
+    indexInc  = incStmt ix
+
+    init_   = initLbl   uq
+    guard_  = guardLbl  uq
+    bottom_ = bottomLbl uq
+    done_   = doneLbl   uq
 
 
 rewriteLoopLabels :: Loop -> Loop
@@ -706,25 +746,23 @@ rewriteLoopLabels loop
     newBlockMap = AMap.map (rewriteBlockLabels lbls) (loopBlockMap loop)
 
 
-insertResultArray :: Loop -> Loop
-insertResultArray loop
-  | Just uq <- loopArrResult loop
-  = let alloc = newArrStmt arr (varE bound)
-        write = writeArrStmt arr (varE ix) (varE elt)
-        slice = sliceArrStmt resultVar arr (varE ix)
-        ret   = returnStmt (varE resultVar)
+writeResultArray :: Unique -> Loop -> Loop
+writeResultArray uq loop = process loop
+ where
+  alloc   = newArrStmt arr (varE bound)
+  write   = writeArrStmt arr (varE ix) (varE elt)
+  slice   = sliceArrStmt resultVar arr (varE ix)
+  ret     = returnStmt (varE resultVar)
 
-        arr   = arrayVar  uq
-        bound = lengthVar uq
-        ix    = indexVar  uq
-        elt   = eltVar    uq
+  arr     = arrayVar  uq
+  bound   = lengthVar uq
+  ix      = indexVar  uq
+  elt     = eltVar    uq
 
-        process = addStmt alloc (initLbl uq)
-              >>> addStmt write (yieldLbl uq)
-              >>> addStmt slice (doneLbl uq)
-              >>> addStmt ret   (doneLbl uq)
-
-    in  process loop
+  process = addStmt alloc (initLbl uq)
+        >>> addStmt write (yieldLbl uq)
+        >>> addStmt slice (doneLbl uq)
+        >>> addStmt ret   (doneLbl uq)
 
 
 -- | All declarations must go first in the block.
@@ -749,7 +787,9 @@ reorderDecls loop = loop { loopBlockMap = AMap.map perblock (loopBlockMap loop) 
     isDecl (Bind   _ _)      = True
     isDecl (Assign _ _)      = True
     isDecl (ReadArray _ _ _) = True
+    isDecl (ArrayLength _ _) = True
     isDecl _            = False
+
 
 instance Monoid Loop where
   mempty = Loop Nothing Map.empty Nothing Nothing AMap.empty
@@ -823,6 +863,16 @@ varE :: Var -> Expr
 varE = VarE
 
 
+-- | Shorthand for applying a 1-argument function to a var.
+fun1 :: (Elt a, Elt b) => (Term a -> Term b) -> Var -> Expr
+fun1 f x = (TermE (lam f)) `AppE` (VarE x)
+
+
+-- | Shorthand for applying a 2-argument function to a var.
+fun2 :: (Elt a, Elt b, Elt c) => (Term a -> Term b -> Term c) -> Var -> Var -> Expr
+fun2 f x y = (TermE (lam2 f)) `AppE` (VarE x) `AppE` (VarE y)
+
+
 constE :: (THElt e, Elt e) => e -> Expr
 constE = LitE
 
@@ -846,6 +896,7 @@ pprName = id
 pprVar :: Var -> String
 pprVar (IdVar name ident) = pprName name ++ "_" ++ pprId ident
 pprVar (SimplVar name) = pprName name
+
 
 pprId :: Id -> String
 pprId = show

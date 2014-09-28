@@ -301,52 +301,50 @@ fuse env = fuse'
 
   fuse' (ManifestG vec) uq = (loop,uq)
    where
-    arrVar    = arrayVar uq   -- array variable 'arr_uq'
-    ixVar     = indexVar uq   -- index variable 'ix_uq'
-    lenVar    = lengthVar uq  -- length variable 'len_uq'
-    aVar      = eltVar uq     -- element variable 'elt_uq' (result of every read)
+    arrVar     = arrayVar uq   -- array variable 'arr_uq'
+    ixVar      = indexVar uq   -- index variable 'ix_uq'
+    lenVar     = lengthVar uq  -- length variable 'len_uq'
+    aVar       = eltVar uq     -- element variable 'elt_uq' (result of every read)
 
     -- init
-    lenBind   = bindStmt lenVar (AppE (varE lengthFn) (varE arrVar))
+    lenBind    = arrLenStmt lenVar arrVar
     init_stmts = [lenBind]
 
     -- body
-    readStmt  = readArrStmt aVar arrVar (varE ixVar)  -- read statement
+    readStmt   = readArrStmt aVar arrVar (varE ixVar)  -- read statement
     body_stmts = [readStmt]
 
     -- labels
-    init_     = initLbl uq
-    body_     = bodyLbl uq
+    init_      = initLbl uq
+    body_      = bodyLbl uq
 
     -- THE loop
-    loop      = addArg   arrVar (toDyn vec)
-              $ addStmts init_stmts init_
-              $ addStmts body_stmts body_
-              $ defaultLoop uq
+    loop       = addArg   arrVar (toDyn vec)
+               $ addStmts init_stmts init_
+               $ addStmts body_stmts body_
+               $ defaultLoop uq
 
 
   fuse' (MapG f arr) uq = (loop,uq)
    where
     (arr_loop, arr_uq) = fuse' arr uq -- TODO: this uq means nothing
-    aVar      = eltVar arr_uq         -- element of source array
-    -- BODY
-    -- Binding for `f`
-    fVar      = var "f" uq            -- name of function to apply
-    fBody     = TermE (lam f)         -- f's body in HOAS representation
-    fBind     = bindStmt fVar fBody   -- f = <HOAS.Term>
-    -- Binding for result element `b`
-    bVar      = eltVar uq             -- resulting element variable
-    fApp      = AppE (varE fVar) (varE aVar) -- function application
-    bBind     = bindStmt bVar fApp    -- bind result
-    bodyStmts = [fBind, bBind]        -- body block has two statements
-    -- LOOP
-    loop      = setArrResultOnly uq
-              -- >$ addArg fVar (toDyn f)
-              $ addStmts bodyStmts (bodyLbl uq)
-              $ rebindIndexAndLengthVars uq arr_uq
-              -- $ addDefaultControlFlow uq
-              $ addDefaultSynonymLabels uq arr_uq
-              $ arr_loop
+    aVar       = eltVar arr_uq         -- element of input array
+    bVar       = eltVar uq             -- element of output array
+
+    -- body
+    fApp       = fun1 f aVar           -- f function application
+    bBind      = bindStmt bVar fApp    -- bind result
+    body_stmts = [bBind]               -- body block has two statements
+
+    -- labels
+    body_      = bodyLbl uq
+
+    -- THE loop
+    loop       = setArrResultOnly uq
+               $ addStmts body_stmts body_
+               $ rebindIndexAndLengthVars uq arr_uq
+               $ addDefaultSynonymLabels  uq arr_uq
+               $ arr_loop
 
 
   fuse' (ZipWithG f arr brr) uq = (loop,uq)
@@ -566,34 +564,6 @@ fuse env = fuse'
   getScalar _ _ = error "getScalar: Failed scalar lookup. Make sure the scalar argument is constructed with Scalar AST constructor."
 
 
-fun2 :: (Elt a, Elt b, Elt c) => (Term a -> Term b -> Term c) -> Var -> Var -> Expr
-fun2 f x y = (TermE (lam2 f)) `AppE` (VarE x) `AppE` (VarE y)
-
-
--- | Add sequential loop statements to an existing loop.
---
--- Given a unique 'uq' of a loop it will insert the following statements:
--- @
---   guard:
---     unless ix_uq < len_uq | done_uq
---   bottom:
---     ix_uq := ix_uq + 1
--- @
-iterate :: Unique -> Loop -> Loop
-iterate uq = addStmt indexTest guard
-           . addStmt indexInc  bottom
-  where
-    ix     = indexVar uq
-    len    = lengthVar uq
-
-    indexTest = guardStmt (fun2 ltInt ix len) done
-    indexInc  = incStmt ix
-
-    guard  = guardLbl uq
-    bottom = bottomLbl uq
-    done   = doneLbl uq
-
-
 -- | Adds predefined control flow for nested loops.
 --
 -- The function takes loop/id of segd, loop/id of data,
@@ -661,25 +631,39 @@ nestLoops (segd_loop, segd_uq) (data_loop, data_uq) rate_uq new_uq = loop
 
 
 
--- | Sets the upper bound of an array to be the same as that
---   of another array.
+-- | Sets the upper bound of an array to be the same as that of another array.
+--
+-- Length propagates from first to last combinator in the pipeline.
+--
+-- 1st argument: curr
+-- 2nd argument: prev
 rebindLengthVar :: Unique -> Unique -> Loop -> Loop
-rebindLengthVar nu old = addStmt stmt (initLbl nu)
-  where stmt = bindStmt (lengthVar nu) (VarE $ lengthVar old)
+rebindLengthVar curr prev = addStmt stmt (initLbl curr)
+  where stmt = bindStmt (lengthVar curr) (VarE $ lengthVar prev)
 
--- | Sets the index of a combinator to be the same as that of
---   the previous combinator in a pipeline.
---   
---   Since the index is likely to change it updates it in the guard.
+
+-- | Sets the index of the *previous* combinator in a pipeline to be the same
+--   as the index of the current combinator.
+--
+-- Index propagates from last to first combinator in the pipeline.
+-- Combinators that are inherently sequential (e.g. @filter@) initiate the propagation.
+--
+-- 1st argument: curr
+-- 2nd argument: prev
+-- TODO: See where should we rebind to avoid desyncronisation, i.e. extra loop vars
 rebindIndexVar :: Unique -> Unique -> Loop -> Loop
-rebindIndexVar nu old = addStmt bndStmt (yieldLbl nu)
-                      . addStmt bndStmt (doneLbl nu)
-  where bndStmt = bindStmt (indexVar nu) (VarE $ indexVar old)
+rebindIndexVar curr prev = addStmt bndStmt (guardLbl prev)
+  where bndStmt = bindStmt (indexVar prev) (varE $ indexVar curr)
 
 
+-- | See comments for @rebind{Index,Length}Var@,
+--   especially the direction of propagation.
+--
+-- 1st argument: curr
+-- 2nd argument: prev
 rebindIndexAndLengthVars :: Unique -> Unique -> Loop -> Loop
-rebindIndexAndLengthVars nu old = rebindLengthVar nu old
-                                . rebindIndexVar nu old
+rebindIndexAndLengthVars curr prev = rebindLengthVar curr prev
+                                   . rebindIndexVar  curr prev
 
 
 fuseToLoop :: Typeable e => AST e -> IO Loop
