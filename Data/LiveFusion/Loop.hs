@@ -33,8 +33,6 @@ import Data.Maybe
 import Data.Set ( Set )
 import qualified Data.Set as Set
 
--- TODO: We should not be relying on an Int type synonym from some package.
-import Data.Reify.Graph ( Unique )
 import Data.Dynamic
 import Data.List as List
 import Data.Monoid

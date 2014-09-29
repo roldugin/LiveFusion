@@ -2,8 +2,7 @@ module Data.LiveFusion.LoopFunctions where
 
 import Data.LiveFusion.DisjointSet as Rates
 import Data.LiveFusion.Loop as Loop
-
-import Data.Reify.Graph ( Unique )
+import Data.LiveFusion.Types ( Unique )
 
 
 -- | Sets the index of the *previous* combinator in a pipeline to be the same

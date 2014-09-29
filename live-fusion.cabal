@@ -15,11 +15,15 @@ Library
     Data.LiveFusion
 
     -- Frontend
+    Data.LiveFusion.AST
     Data.LiveFusion.Combinators
     Data.LiveFusion.Types
 
     -- Loop language
+    Data.LiveFusion.Fuse
     Data.LiveFusion.Loop
+    Data.LiveFusion.LoopFunctions
+    Data.LiveFusion.Sharing
 
     -- Scalar language
     Data.LiveFusion.Scalar.Convert
