@@ -16,10 +16,8 @@ import Data.Maybe
 import Data.Typeable
 
 
-
-fuse :: Typeable e => Map Unique (WrappedASG Unique) -> (ASG e Unique) -> Unique -> (Loop, Unique)
-fuse env node uq = let fused = fuse' node uq
-                   in  (fused, getJustRate fused)
+fuse :: Typeable e => Map Unique (WrappedASG Unique) -> (ASG e Unique) -> Unique -> Loop
+fuse env node uq = fuse' node uq
  where
   fuse' :: Typeable e => (ASG e Unique) -> Unique -> Loop
 
@@ -101,8 +99,8 @@ manifestG uq vec = loop
   loop       = addArg   arrVar (toDyn vec)
              $ addStmts init_stmts init_
              $ addStmts body_stmts body_
-             $ addToInsertTest uq
-             $ addToInsertIncr uq
+             $ addToInsertTests uq
+             $ addToInsertIncrs uq
              $ setTheRate uq
              $ defaultLoop uq
 

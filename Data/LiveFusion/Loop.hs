@@ -363,11 +363,12 @@ setFinalGoto from to = updateBlock from
 -- * Some loop field helper functions
 
 
-addToInsertIncr :: Unique -> Loop -> Loop
-addToInsertIncr uq loop = loop { loopInsertIncrs = uq : loopInsertIncrs loop }
+addToInsertIncrs :: Unique -> Loop -> Loop
+addToInsertIncrs uq loop = loop { loopInsertIncrs = uq : loopInsertIncrs loop }
 
-addToInsertTest :: Unique -> Loop -> Loop
-addToInsertTest uq loop = loop { loopInsertTests = uq : loopInsertTests loop }
+
+addToInsertTests :: Unique -> Loop -> Loop
+addToInsertTests uq loop = loop { loopInsertTests = uq : loopInsertTests loop }
 
 
 setTheRate :: Unique -> Loop -> Loop
@@ -739,38 +740,48 @@ postprocessLoop :: Loop -> Loop
 postprocessLoop loop = rewriteLoopLabels
                      $ reorderDecls
                      $ writeResultArray uq
-                     $ iterateLoop uq
+                     $ insertTests
+                     $ insertIncrs
                      $ loop
   where
     uq  = fromMaybe err (loopArrResult loop)
     err = error "postprocessLoop: No array result set"
 
 
--- | Add sequential loop statements to an existing loop.
---
--- Given a unique 'uq' of a loop it will insert the following statements:
--- @
---   guard:
---     unless ix_uq < len_uq | done_uq
---   bottom:
---     ix_uq := ix_uq + 1
--- @
-iterateLoop :: Unique -> Loop -> Loop
-iterateLoop uq = addStmt indexTest guard_
-               . addStmt indexInc  bottom_
-               . addStmt indexBind init_
-  where
-    ix     = indexVar uq
-    len    = lengthVar uq
+insertTests :: Loop -> Loop
+insertTests loop = foldl insertTest loop (loopInsertTests loop)
+ where
+  insertTest loop uq' = addStmt indexTest guard_
+                      $ loop
+   where
+    uq        = Rates.representative uq' (loopRates loop)
 
-    indexBind = bindStmt ix (TermE (0 :: Term Int))
+    ix        = indexVar uq
+    len       = lengthVar uq
+
     indexTest = guardStmt (fun2 ltInt ix len) done_
-    indexInc  = incStmt ix
 
-    init_   = initLbl   uq
-    guard_  = guardLbl  uq
-    bottom_ = bottomLbl uq
-    done_   = doneLbl   uq
+    guard_    = guardLbl  uq
+    done_     = doneLbl   uq
+
+
+
+insertIncrs :: Loop -> Loop
+insertIncrs loop = foldl insertIncr loop (loopInsertIncrs loop)
+ where
+  insertIncr loop uq' = addStmt indexInit init_
+                      $ addStmt indexIncr bottom_
+                      $ loop
+   where
+    uq        = Rates.representative uq' (loopRates loop)
+
+    ix        = indexVar uq
+
+    indexInit = bindStmt ix (TermE (0 :: Term Int))
+    indexIncr = incStmt ix
+
+    init_     = initLbl   uq
+    bottom_   = bottomLbl uq
 
 
 rewriteLoopLabels :: Loop -> Loop

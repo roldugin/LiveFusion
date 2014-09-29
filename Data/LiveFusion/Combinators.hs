@@ -48,12 +48,10 @@ uc = unsafeCoerce
 ucText = "unsafeCoerce"
 
 
-
-
 fuseToLoop :: Typeable e => AST e -> IO Loop
 fuseToLoop ast = do
   (env, rootUq, Just rootNode) <- recoverSharing ast
-  let (loop, resultUq) = fuse env rootNode rootUq
+  let loop = fuse env rootNode rootUq
   return loop
 
 
