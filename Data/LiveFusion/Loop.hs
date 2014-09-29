@@ -309,7 +309,7 @@ updateBlock lbl f loop = putBlock lbl block' loop
     block' = f block
 
 
--- | Retreives an existing block out of the loop or returns and empty block
+-- | Retrieves an existing block out of the loop or returns and empty block
 getBlock :: Label -> Loop -> Block
 getBlock lbl loop = fromMaybe emptyBlock maybeBlock
   where
@@ -361,6 +361,18 @@ setFinalGoto from to = updateBlock from
 
 -------------------------------------------------------------------------------
 -- * Some loop field helper functions
+
+
+addToInsertIncr :: Unique -> Loop -> Loop
+addToInsertIncr uq loop = loop { loopInsertIncrs = uq : loopInsertIncrs loop }
+
+addToInsertTest :: Unique -> Loop -> Loop
+addToInsertTest uq loop = loop { loopInsertTests = uq : loopInsertTests loop }
+
+
+setTheRate :: Unique -> Loop -> Loop
+setTheRate uq loop = loop { loopTheRate = Just uq }
+
 
 getJustRate :: Loop -> Unique
 getJustRate loop = fromMaybe err (loopTheRate loop)

@@ -101,6 +101,9 @@ manifestG uq vec = loop
   loop       = addArg   arrVar (toDyn vec)
              $ addStmts init_stmts init_
              $ addStmts body_stmts body_
+             $ addToInsertTest uq
+             $ addToInsertIncr uq
+             $ setTheRate uq
              $ defaultLoop uq
 
 
@@ -120,10 +123,13 @@ mapG uq f arr_loop = loop
   body_      = bodyLbl uq
 
   -- THE loop
-  loop       = setArrResultOnly uq
+  loop       = setTheRate uq
+  	         $ setArrResultOnly uq
              $ addStmts body_stmts body_
-             $ rebindIndexAndLengthVars uq arr_uq
+             $ reuseRate                uq arr_uq
+             $ rebindLengthVar          uq arr_uq
              $ addDefaultSynonymLabels  uq arr_uq
+             $ setTheRate uq
              $ arr_loop
 
 
@@ -134,64 +140,72 @@ zipWithG uq f arr_loop brr_loop = loop
 
   aVar      = eltVar arr_uq
   bVar      = eltVar brr_uq
+  cVar      = eltVar uq
+
+  -- body
+  fApp       = fun2 f aVar bVar
+  cBind      = bindStmt cVar fApp
+  body_stmts = [cBind]
+
+  -- labels
+  body_      = bodyLbl uq
+
+  -- THE loop
+  loop       = setArrResultOnly uq
+             $ addStmts body_stmts body_
+             $ rebindLengthVar uq arr_uq -- be careful: arbitrary choice between a and b
+             $ setTheRate uq
+             $ abrr_loop
 
   -- First separately unite uq/arr_uq and uq/brr_uq
   -- so they know how to merge into one loop.
-  arr_loop' = addDefaultSynonymLabels uq arr_uq arr_loop
-  brr_loop' = addDefaultSynonymLabels uq brr_uq brr_loop
-  abrr_loop = arr_loop' `Loop.append` brr_loop'
-  -- BODY
-  -- Binding for `f`
-  fVar      = var "f" uq            -- name of function to apply
-  fBody     = TermE (lam2 f)        -- f's body in HOAS representation
-  fBind     = bindStmt fVar fBody   -- f = <HOAS.Term>              
-  cVar      = eltVar uq             -- resulting element variable
-  fApp      = (varE fVar) `AppE` (varE aVar) `AppE` (varE bVar) -- function application
-  cBind     = bindStmt cVar fApp    -- bind result
-  bodyStmts = [fBind,cBind]
-  -- LOOP
-  loop      = setArrResultOnly uq
-     -- >       $ addArg fVar (toDyn f)
-            $ addStmts bodyStmts (bodyLbl uq)
-            $ rebindIndexAndLengthVars uq arr_uq -- be careful: arbitrary choice between a and b
-            -- $ addDefaultControlFlow uq
-            $ abrr_loop
+  arr_loop'  = reuseRate               uq arr_uq
+  	         $ addDefaultSynonymLabels uq arr_uq
+  	         $ arr_loop
+  brr_loop'  = reuseRate               uq brr_uq
+             $ addDefaultSynonymLabels uq brr_uq
+             $ brr_loop
+  abrr_loop  = arr_loop' `Loop.append` brr_loop'
 
 
 filterG uq p arr_loop = loop
  where
-  arr_uq    = getJustRate arr_loop
-  aVar      = eltVar arr_uq
+  arr_uq     = getJustRate arr_loop
+  aVar       = eltVar arr_uq
+  bVar       = eltVar uq
+  ixVar      = indexVar uq   -- writing index
 
-  -- INIT
-  ixVar     = indexVar uq                     -- writing index
-  ixInit    = bindStmt ixVar (LitE (0::Int))  -- index initialization
-  initStmts = [ixInit]
-  -- BODY
-  predExp   = AppE (TermE (lam p)) (varE aVar)
-  guard     = guardStmt predExp (bottomLbl uq)
-  resVar    = eltVar uq
-  resBind   = bindStmt resVar (VarE aVar)
-  -- NOTE: This will bug out if there are more guards
-  --       or anything else important in the remainder of the body
-  bodyStmts = [guard, resBind]
-  -- YIELD
-  -- WARNING: Assignment statement preceeds the array write stmt (added in the postprocess step)
-  --          It it fine with the current semantics as the unupdated index will be used,
-  --          however this is error prone and may not be true with code gens other than HsCodeGen.
-  ixUpdate  = assignStmt ixVar (AppE (AppE (varE plusFn) (varE ixVar)) (LitE (1::Int)))  -- index step
-  yieldStmts = [ixUpdate]
-  -- LOOP
-  loop      = setArrResultOnly uq
-            -- >$ addArg pVar (toDyn p)
-            $ addStmts initStmts (initLbl uq)
-            $ addStmts bodyStmts (bodyLbl uq)
-            $ addStmts yieldStmts (yieldLbl uq)
-            -- Note that we aren't rebinding index since read/write indexes are not the same with Filter
-            $ rebindLengthVar uq arr_uq
-            -- $ addDefaultControlFlow uq
-            $ addDefaultSynonymLabels uq arr_uq
-            $ arr_loop
+  -- init
+  ixInit     = bindStmt ixVar (LitE (0::Int))  -- index initialization
+  init_stmts = [ixInit]
+
+  -- body
+  predExp    = fun1 p aVar
+  guard      = guardStmt predExp bottom_
+  bBind      = bindStmt bVar (VarE aVar)
+  body_stmts = [guard, bBind]
+
+  -- yield
+  ixUpdate   = incStmt ixVar
+  yield_stmts = [ixUpdate]
+
+  -- labels
+  init_      = initLbl uq
+  body_      = bodyLbl uq
+  yield_     = yieldLbl uq
+  bottom_    = bottomLbl uq
+
+  -- THE loop
+  loop       = setArrResultOnly uq
+             $ addStmts init_stmts  init_
+             $ addStmts body_stmts  body_
+             $ addStmts yield_stmts yield_
+             -- Note that we aren't reusing the rate since read/write indexes are not synchronised
+             $ freshRate       uq
+             $ rebindLengthVar uq arr_uq
+             $ addDefaultSynonymLabels uq arr_uq
+             $ setTheRate uq
+             $ arr_loop
 
 
 scanG uq f z arr_loop = loop
