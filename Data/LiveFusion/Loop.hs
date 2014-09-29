@@ -358,8 +358,19 @@ setFinalGoto from to = updateBlock from
                                    (setBlockFinal $ gotoStmt to)
 
 
--- Scalar and Array results manipulation
---------------------------------------------------------------------------------
+
+-------------------------------------------------------------------------------
+-- * Some loop field helper functions
+
+getJustRate :: Loop -> Unique
+getJustRate loop = fromMaybe err (loopTheRate loop)
+  where
+    err = error "getJustRate: This loop does not have the rate set."
+
+
+
+-------------------------------------------------------------------------------
+-- * Scalar and Array results manipulation
 
 setArrResultImpl :: Maybe Id -> Loop -> Loop
 setArrResultImpl mbId loop = loop { loopArrResult = mbId }
