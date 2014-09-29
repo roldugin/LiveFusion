@@ -17,7 +17,9 @@ import Data.LiveFusion.Backend
 import Data.LiveFusion.Util
 import Data.LiveFusion.Types
 import Data.LiveFusion.AliasMap ( AliasMap )
+import Data.LiveFusion.DisjointSet as Rates
 import qualified Data.LiveFusion.AliasMap as AMap
+
 
 -- We should not be importing any backend specific stuff, but for now we hardcoded Exp to be depend on THElt
 -- That is, elements that can be generated in TemplateHaskell
@@ -236,12 +238,26 @@ data Loop = Loop { -- | Loop entry block
 
                    -- | Resulting manifest array
                  , loopArrResult    :: Maybe Id  -- May not be the best way to represent this,
-                                                 -- but currently the easiest
+                                                 -- but currently the easiest.
 
                    -- | Resulting scalar result
                  , loopScalarResult :: Maybe Var
 
-                   -- | Loops's code block with their accosiated labels
+
+                   -- | The id of the loop whose @yield@ block produces the elements
+                 , loopTheRate      :: Maybe Unique
+
+
+                   -- | All the different rates of the loop, unified
+                 , loopRates        :: IntDisjointSet
+
+
+                   -- | Guard tests and increments that need to be inserted
+                 , loopInsertIncrs  :: [Unique]  -- These are for the postprocessing step
+                 , loopInsertTests  :: [Unique]  -- and should probably be dealt with more elegantly.
+
+
+                   -- | Loop's basic blocks with their associated labels
                  , loopBlockMap     :: BlockMap
                  }
 
@@ -421,7 +437,7 @@ pprLabel = show
 
 
 instance Show Loop where
-  show (Loop loopEntry loopArgs loopArrResult loopScalarResult loopBlockMap)
+  show (Loop loopEntry loopArgs loopArrResult loopScalarResult _ _ _ _ loopBlockMap)
     = "Loop Entry:    "  ++  maybe "None" pprLabel loopEntry                   ++\
       "Loop Args:     "  ++  (show $ Map.keys loopArgs)                        ++\
       "Array Result:  "  ++  maybe "None" (pprVar . arrayVar) loopArrResult    ++\
@@ -595,7 +611,7 @@ assumeMany vars env = foldr assume env vars
 -- | Lists the block as as potential next block to which control flow will be transferred
 adoptBlock :: Label -> Env -> Env
 adoptBlock lbl env
-  = env { envNextBlocks = [lbl] `union` envNextBlocks env }
+  = env { envNextBlocks = [lbl] `List.union` envNextBlocks env }
 
 
 -- | Retrieves the free variables of an expression
@@ -658,7 +674,7 @@ extendedEnv loop = purgeBlockLocalVars
     allLoopArgVars     = Map.keys $ loopArgs loop
     allLoopDecls       = concatMap (envDeclarations . blockEnv) (loopBlocks loop)
     allLoopAssumptions = concatMap (envAssumptions  . blockEnv) (loopBlocks loop)
-    allBlockLocalVars  = (allLoopDecls `union` allLoopArgVars)
+    allBlockLocalVars  = (allLoopDecls `List.union` allLoopArgVars)
                        \\ allLoopAssumptions
 
     purgeBlockLocalVars :: VarMap -> VarMap
@@ -791,19 +807,24 @@ reorderDecls loop = loop { loopBlockMap = AMap.map perblock (loopBlockMap loop) 
     isDecl _            = False
 
 
+{- loopEntry, loopArgs, loopArrResult, loopScalarResult, loopTheRate, loopRates, loopInsertIncrs, loopInsertTests, loopBlockMap -}
 instance Monoid Loop where
-  mempty = Loop Nothing Map.empty Nothing Nothing AMap.empty
+  mempty = Loop Nothing Map.empty Nothing Nothing Nothing Rates.empty [] [] AMap.empty
   mappend loop1 loop2
     = Loop { loopEntry        = loopEntry    `joinWith` (<|>)
            , loopArgs         = loopArgs     `joinWith` Map.union
            , loopArrResult    = Nothing
            , loopScalarResult = Nothing
+           , loopTheRate      = loopTheRate  `joinWith` (<|>)
+           , loopRates        = loopRates    `joinWith` Rates.merge
+           , loopInsertIncrs  = loopInsertTests `joinWith` (++)
+           , loopInsertTests  = loopInsertIncrs `joinWith` (++)
            , loopBlockMap     = loopBlockMap `joinWith` AMap.unionWith appendLoopBlockMap
            }
     where
       joinWith :: (Loop  -> field)          -- field to take from loop
                -> (field -> field -> field) -- joining function
-               -> field                    -- new field
+               -> field                     -- new field
       field `joinWith` f = f (field loop1) (field loop2)
 
 
@@ -811,8 +832,8 @@ append :: Loop -> Loop -> Loop
 append = mappend
 
 
-empty :: Loop
-empty = mempty
+emptyLoop :: Loop
+emptyLoop = mempty
 
 
 -- | A loop with the default set of basic blocks and control flow.
@@ -820,7 +841,7 @@ defaultLoop :: Id -> Loop
 defaultLoop uq = addDefaultControlFlow uq
                $ setLoopEntry (initLbl uq)
                $ touchDefaultBlocks uq
-               $ empty
+               $ emptyLoop
 
 
 appendLoopBlockMap :: Block -> Block -> Block

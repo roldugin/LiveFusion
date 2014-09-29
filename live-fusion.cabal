@@ -20,8 +20,6 @@ Library
 
     -- Loop language
     Data.LiveFusion.Loop
-    Data.LiveFusion.Util
-    Data.LiveFusion.AliasMap
 
     -- Scalar language
     Data.LiveFusion.Scalar.Convert
@@ -41,6 +39,11 @@ Library
     Data.LiveFusion.HsCodeGen
     Data.LiveFusion.HsEvaluator
 
+    -- Helper modules
+    Data.LiveFusion.AliasMap
+    Data.LiveFusion.DisjointSet
+    Data.LiveFusion.Util
+
 
   Other-Modules:
 
@@ -50,6 +53,7 @@ Library
     base,
     containers,
     data-reify,
+    disjoint-set,
     filepath,
     ghc >= 7.6,
     ghc-paths,

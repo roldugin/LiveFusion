@@ -4,6 +4,7 @@
 module Data.LiveFusion.Combinators where
 
 import Data.LiveFusion.Loop as Loop
+import Data.LiveFusion.LoopFunctions as Loop
 import Data.LiveFusion.Util
 import Data.LiveFusion.HsEvaluator
 import Data.LiveFusion.Types
@@ -642,20 +643,6 @@ rebindLengthVar curr prev = addStmt stmt (initLbl curr)
   where stmt = bindStmt (lengthVar curr) (VarE $ lengthVar prev)
 
 
--- | Sets the index of the *previous* combinator in a pipeline to be the same
---   as the index of the current combinator.
---
--- Index propagates from last to first combinator in the pipeline.
--- Combinators that are inherently sequential (e.g. @filter@) initiate the propagation.
---
--- 1st argument: curr
--- 2nd argument: prev
--- TODO: See where should we rebind to avoid desyncronisation, i.e. extra loop vars
-rebindIndexVar :: Unique -> Unique -> Loop -> Loop
-rebindIndexVar curr prev = addStmt bndStmt (guardLbl prev)
-  where bndStmt = bindStmt (indexVar prev) (varE $ indexVar curr)
-
-
 -- | See comments for @rebind{Index,Length}Var@,
 --   especially the direction of propagation.
 --
@@ -663,7 +650,7 @@ rebindIndexVar curr prev = addStmt bndStmt (guardLbl prev)
 -- 2nd argument: prev
 rebindIndexAndLengthVars :: Unique -> Unique -> Loop -> Loop
 rebindIndexAndLengthVars curr prev = rebindLengthVar curr prev
-                                   . rebindIndexVar  curr prev
+                                   . reuseRate       curr prev
 
 
 fuseToLoop :: Typeable e => AST e -> IO Loop
