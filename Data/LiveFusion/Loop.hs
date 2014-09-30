@@ -58,29 +58,43 @@ data Var = IdVar Name Id
 instance Show Var where
   show = pprVar
 
+
 var :: Name -> Id -> Var
 var = IdVar
 
 eltVar :: Id -> Var
-eltVar = var "elt"
+eltVar = var eltPrefix
 
 indexVar :: Id -> Var
-indexVar = var "ix"
+indexVar = var indexPrefix
 
 lengthVar :: Id -> Var
-lengthVar = var "len"
+lengthVar = var lengthPrefix
 
 arrayVar :: Id -> Var
-arrayVar = var "arr"
+arrayVar = var arrayPrefix
 
 resultVar :: Var
-resultVar = SimplVar "result"
+resultVar = SimplVar resultPrefix
+
+
+eltPrefix = "elt"
+indexPrefix = "ix"
+lengthPrefix = "len"
+arrayPrefix = "arr"
+resultPrefix = "result"
+
 
 -- TODO These are all kinda hacky. We should use the Term language here.
 ltFn = SimplVar "(<)"
 plusFn = SimplVar "(+)"
 lengthFn = SimplVar "arrayLength"
 readFn = SimplVar "readArray"
+
+
+-- For easier language tree traversal
+class Construct c where
+  mapVars :: (Var -> Var) -> c -> c
 
 
 -------------------------------------------------------------------------------
@@ -199,6 +213,22 @@ arrLenStmt   = ArrayLength
 sliceArrStmt = SliceArray
 
 
+instance Construct Stmt where
+  mapVars f stmt = go stmt
+   where
+    go (Bind v e) = Bind (f v) (mapVars f e)
+    go (Assign v e) = Assign (f v) (mapVars f e)
+    go (Case e l1 l2) = Case (mapVars f e) l1 l2
+    go (Guard e l) = Guard (mapVars f e) l
+    go (Goto l) = Goto l
+    go (Return e) = Return (mapVars f e)
+    go (NewArray v e) = NewArray (f v) (mapVars f e)
+    go (ReadArray v1 v2 e) = ReadArray (f v1) (f v2) (mapVars f e)
+    go (WriteArray v ei ex) = WriteArray (f v) (mapVars f ei) (mapVars f ex)
+    go (ArrayLength v1 v2) = ArrayLength (f v1) (f v2)
+    go (SliceArray v1 v2 e) = SliceArray (f v1) (f v2) (mapVars f e)
+
+
 -- | In the final loop we choose just one label out of all
 --   and use it everywhere where the same set of labels is used.
 --
@@ -231,7 +261,14 @@ rewriteStmtLabels lbls = go
 --
 -- TODO: Matching on variable name is ugly.
 rewriteStmtRates :: IntDisjointSet -> Stmt -> Stmt
-rewriteStmtRates rates = id
+rewriteStmtRates rates = mapVars rw
+  where
+    rw v@(IdVar prefix uq)
+      | prefix == indexPrefix
+      = indexVar (Rates.representative uq rates)
+      | otherwise
+      = v
+    rw v_ = v_
 
 
 -------------------------------------------------------------------------------
@@ -922,6 +959,14 @@ data Expr where
 
 instance Show Expr where
   show = pprExpr
+
+
+instance Construct Expr where
+  mapVars f = go
+   where
+    go (VarE v) = VarE (f v)
+    go (AppE e1 e2) = AppE (mapVars f e1) (mapVars f e2)
+    go e_ = e_
 
 
 vAppE :: Var -> Var -> Expr
