@@ -7,6 +7,7 @@ import Data.Map ( Map )
 import qualified Data.Map as Map
 import Control.Category ( (>>>) )
 import Data.List as List
+import Data.Maybe
 
 
 --------------------------------------------------------------------------------
@@ -179,6 +180,15 @@ extendedEnv loop = purgeBlockLocalVars
                       $ nextLbls
 
         in  resultMap
+
+
+-- | Retrieves a block from the map. Like Map.! but with better error messages.
+assumedVarsOfBlock :: Label -> VarMap -> [Var]
+assumedVarsOfBlock lbl emap = fromMaybe err (Map.lookup lbl emap)
+  where
+    err = error
+        $ "Label" +-+ pprLabel lbl +-+ "not in" +-+ pprVarMap emap
+
 
 
 pprVarMap :: VarMap -> String

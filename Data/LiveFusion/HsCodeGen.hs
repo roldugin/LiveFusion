@@ -58,7 +58,7 @@ cgBlock emap lbl blk = blockFun
     cgStmts [] = []
 
 
-    blockArgs = emap ! lbl
+    blockArgs = assumedVarsOfBlock lbl emap
 
     -- Variables that are updated in this block
     dirtyVars = envDirty (blockEnv blk)
@@ -163,7 +163,7 @@ cgStmt _ _ (Return v)
 cgGotoExp :: VarMap -> [Var] -> Label -> TH.Exp
 cgGotoExp emap dirtyVars lbl = applyMany thFName thArgs
   where
-    args    = emap ! lbl
+    args    = assumedVarsOfBlock lbl emap
 
     thFName = TH.VarE $ cgLabelName lbl
 
