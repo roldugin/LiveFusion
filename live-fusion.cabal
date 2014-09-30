@@ -23,6 +23,7 @@ Library
     Data.LiveFusion.Fuse
     Data.LiveFusion.Loop
     Data.LiveFusion.LoopFunctions
+    Data.LiveFusion.Liveness
     Data.LiveFusion.Sharing
 
     -- Scalar language

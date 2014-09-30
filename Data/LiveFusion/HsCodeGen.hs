@@ -15,6 +15,7 @@ import Data.LiveFusion.Util
 import Data.LiveFusion.Types
 import Data.LiveFusion.Loop as Lp
 import qualified Data.LiveFusion.AliasMap as AMap
+import Data.LiveFusion.Liveness
 
 import Language.Haskell.TH as TH
 
