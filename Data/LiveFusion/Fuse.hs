@@ -346,7 +346,7 @@ scan_sG uq f z segd_loop data_loop = loop
             $ addStmts body_data_stmts body_data
             $ addStmts bottom_data_stmts bottom_data
             -- The usual stuff
-            $ rebindIndexAndLengthVars uq data_uq
+            $ rebindLengthVar uq data_uq
             $ nested_loops
 
   nested_loops = nestLoops segd_loop
@@ -375,7 +375,7 @@ nestLoops segd_loop data_loop rate_uq new_uq = loop
 
   -- guard_data
   ixVar      = indexVar data_uq
-  grd        = guardStmt (fun2 ltInt ixVar segendVar) body_segd'
+  grd        = guardStmt (fun2 ltInt ixVar segendVar) inner_loop_exit
   guard_data_stmts = [grd]
   
   -- labels
@@ -385,6 +385,11 @@ nestLoops segd_loop data_loop rate_uq new_uq = loop
   body_segd' = bodyLbl new_uq
   yield_segd = yieldLbl segd_uq
   guard_data = guardLbl data_uq
+
+  inner_loop_exit
+    | rate_uq == segd_uq = body_segd'
+    | rate_uq == data_uq = yield_segd
+    | otherwise = err_BAD_RATE
 
   -- THE loop
   loop = setTheRate new_uq
@@ -413,10 +418,7 @@ nestLoops segd_loop data_loop rate_uq new_uq = loop
     = addSynonymLabels stdLabelNames new_uq data_uq
     $ merged_loops
     -- Rate not recognised
-    | otherwise = error
-                $ "nestLoops: Passed rate" +-+ show rate_uq +-+
-                  "does not match segd" +-+ (paren $ show segd_uq) +-+
-                  "or data" +-+ (paren $ show data_uq) +-+ "rates."
+    | otherwise = err_BAD_RATE
 
   merged_loops
     -- Note: Order of appending matters given the order of synonyms
@@ -425,6 +427,11 @@ nestLoops segd_loop data_loop rate_uq new_uq = loop
     $ addSynonymLabel (doneLbl data_uq) (doneLbl segd_uq)
     $ segd_loop
 
+  err_BAD_RATE :: a
+  err_BAD_RATE = error
+               $ "nestLoops: Passed rate" +-+ show rate_uq +-+
+                 "does not match segd" +-+ (paren $ show segd_uq) +-+
+                 "or data" +-+ (paren $ show data_uq) +-+ "rates."
 
 
 -- | Sets the upper bound of an array to be the same as that of another array.
@@ -436,13 +443,3 @@ nestLoops segd_loop data_loop rate_uq new_uq = loop
 rebindLengthVar :: Unique -> Unique -> Loop -> Loop
 rebindLengthVar curr prev = addStmt stmt (initLbl curr)
   where stmt = bindStmt (lengthVar curr) (VarE $ lengthVar prev)
-
-
--- | See comments for @rebind{Index,Length}Var@,
---   especially the direction of propagation.
---
--- 1st argument: curr
--- 2nd argument: prev
-rebindIndexAndLengthVars :: Unique -> Unique -> Loop -> Loop
-rebindIndexAndLengthVars curr prev = rebindLengthVar curr prev
-                                   . reuseRate       curr prev
