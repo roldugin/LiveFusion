@@ -3,6 +3,7 @@ module Data.LiveFusion.Util where
 
 import Data.List
 import Text.Printf
+import Debug.Trace
 
 -- | Concatenate two strings with newline.
 infixr 5  ++\
@@ -98,3 +99,8 @@ fixedCompare order x y = cmp mbx mby
 -- | Sort list on keys.
 sortOnKeysBy :: Ord k => (k -> k -> Ordering) -> [(k,v)] -> [(k,v)]
 sortOnKeysBy cmp = sortBy (\a b -> (fst a) `cmp` (fst b))
+
+
+-- | Trace show a value
+tr :: Show a => a -> a
+tr a = trace (show a) a

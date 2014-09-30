@@ -15,3 +15,11 @@ reuseRate new old loop = loop { loopRates = unionInsert new old (loopRates loop)
 freshRate :: Unique -> Loop -> Loop
 freshRate rate loop = loop { loopRates = insert rate (loopRates loop) }
 
+
+-- | A loop with the default set of basic blocks and control flow.
+defaultLoop :: Id -> Loop
+defaultLoop uq = freshRate uq
+               $ addDefaultControlFlow uq
+               $ setLoopEntry (initLbl uq)
+               $ touchDefaultBlocks uq
+               $ emptyLoop

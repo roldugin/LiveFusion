@@ -8,6 +8,7 @@ import Data.LiveFusion.Sharing
 import Data.LiveFusion.Scalar.HOAS as HOAS
 import Data.LiveFusion.HsBackend.Prelude
 import Data.LiveFusion.Types
+import Data.LiveFusion.Util
 
 import Data.Dynamic
 import Data.List as List
@@ -232,7 +233,7 @@ scanG uq f z arr_loop = loop
   init_      = initLbl uq
   body_      = bodyLbl uq
   bottom_    = bottomLbl uq
-  
+
   -- THE loop
   loop       = setTheRate uq
   	         $ setArrResult uq
@@ -283,7 +284,8 @@ fold_sG uq f z segd_loop data_loop = loop
   bottom_data = bottomLbl data_uq
 
   -- THE loop
-  loop      = setArrResult uq
+  loop      = setTheRate uq
+            $ setArrResult uq
             $ setScalarResult accVar
             -- Segd (segd_uq) stuff below
             $ addStmts init_segd_stmts init_segd
@@ -292,13 +294,13 @@ fold_sG uq f z segd_loop data_loop = loop
             -- Data (data_uq/uq) stuff below
             $ addStmts bottom_data_stmts bottom_data
             -- The usual stuff
-            $ rebindIndexAndLengthVars uq segd_uq
+            $ rebindLengthVar uq segd_uq
             $ nested_loops
 
-  nested_loops = nestLoops (segd_loop,segd_uq)
-                           (data_loop,data_uq)
-                           segd_uq {- new rate: -}
-                           uq      {- new id: -}
+  nested_loops = nestLoops segd_loop
+                           data_loop
+                           segd_uq   {- new rate: -}
+                           uq        {- new id: -}
 
 
 scan_sG uq f z segd_loop data_loop = loop
@@ -347,8 +349,8 @@ scan_sG uq f z segd_loop data_loop = loop
             $ rebindIndexAndLengthVars uq data_uq
             $ nested_loops
 
-  nested_loops = nestLoops (segd_loop,segd_uq)
-                           (data_loop,data_uq)
+  nested_loops = nestLoops segd_loop
+                           data_loop
                            data_uq {- new rate: -}
                            uq      {- new id: -}
 
@@ -359,33 +361,34 @@ scan_sG uq f z segd_loop data_loop = loop
 -- id of rate (usually either segd_uq or data_uq) and id of result loop.
 --
 -- See comment [1] at the bottom of the file
-nestLoops :: (Loop,Unique) -> (Loop,Unique) -> Unique -> Unique -> Loop
-nestLoops (segd_loop, segd_uq) (data_loop, data_uq) rate_uq new_uq = loop
+nestLoops :: Loop -> Loop -> Unique -> Unique -> Loop
+nestLoops segd_loop data_loop rate_uq new_uq = loop
  where
+  segd_uq    = getJustRate segd_loop
+  data_uq    = getJustRate data_loop
+
   -- body_segd (run before each segment, and acts like init for the segment loop)
-  seglenVar = eltVar segd_uq
-  segendVar = var "end" new_uq  -- element counter that is updated for every segment
-  segendSet = bindStmt segendVar (fun2 plusInt ixVar seglenVar)
+  seglenVar  = eltVar segd_uq
+  segendVar  = var "end" new_uq  -- element counter that is updated for every segment
+  segendSet  = bindStmt segendVar (fun2 plusInt ixVar seglenVar)
   body_segd_stmts = [segendSet]
 
   -- guard_data
-  ixVar = indexVar data_uq
-  lt = (<.) :: Term Int -> Term Int -> Term Bool
-  grd = guardStmt (fun2 lt ixVar segendVar) body_segd'
+  ixVar      = indexVar data_uq
+  grd        = guardStmt (fun2 ltInt ixVar segendVar) body_segd'
   guard_data_stmts = [grd]
   
-  -- some label redefinitions
+  -- labels
   init_      = initLbl new_uq
-
   guard_segd = guardLbl segd_uq
   body_segd  = bodyLbl segd_uq
   body_segd' = bodyLbl new_uq
-
   yield_segd = yieldLbl segd_uq
   guard_data = guardLbl data_uq
 
   -- THE loop
-  loop = id
+  loop = setTheRate new_uq
+       $ reuseRate new_uq rate_uq
        -- Start with outer (segd) loop
        $ setFinalGoto init_ guard_segd
        -- Body of segd loop *before* going into inner loop
@@ -393,30 +396,34 @@ nestLoops (segd_loop, segd_uq) (data_loop, data_uq) rate_uq new_uq = loop
        $ setFinalGoto body_segd guard_data
        -- Replace statements in guard of data (assuming segd is correct)
        $ replaceStmts guard_data_stmts guard_data
+       $ removeFromInsertTests data_uq
        $ loop'
 
   -- Unite the new loop with whatever loop provides the correct rate.
-  loop'= case rate_uq of
-          -- If the new loop produces elements at the rate of segd
-          segd_uq ->
-            -- Body of segd loop *after* coming back from inner loop
-            setFinalGoto body_segd' yield_segd
-            -- Don't unite the body block! (see comment)
-            $ addSynonymLabels (List.delete bodyNm stdLabelNames) new_uq segd_uq
-            $ merged_loops
-
-          -- If the new loop produces elements at the rate of data
-          data_uq ->
-            addSynonymLabels stdLabelNames new_uq data_uq
-            $ merged_loops
+  loop'
+    -- The new loop produces elements at the rate of segd
+    | rate_uq == segd_uq
+      -- Body of segd loop *after* coming back from inner loop
+    = setFinalGoto body_segd' yield_segd
+      -- Don't unite the body block! (see comment)
+    $ addSynonymLabels (List.delete bodyNm stdLabelNames) new_uq segd_uq
+    $ merged_loops
+    -- The new loop produces elements at the rate of data
+    | rate_uq == data_uq
+    = addSynonymLabels stdLabelNames new_uq data_uq
+    $ merged_loops
+    -- Rate not recognised
+    | otherwise = error
+                $ "nestLoops: Passed rate" +-+ show rate_uq +-+
+                  "does not match segd" +-+ (paren $ show segd_uq) +-+
+                  "or data" +-+ (paren $ show data_uq) +-+ "rates."
 
   merged_loops
-       -- Note: Order of appending matters given the order of synonyms
-       = Loop.append data_loop
-       $ addSynonymLabel (initLbl data_uq) (initLbl segd_uq)
-       $ addSynonymLabel (doneLbl data_uq) (doneLbl segd_uq)
-       $ segd_loop
-
+    -- Note: Order of appending matters given the order of synonyms
+    = Loop.append data_loop
+    $ addSynonymLabel (initLbl data_uq) (initLbl segd_uq)
+    $ addSynonymLabel (doneLbl data_uq) (doneLbl segd_uq)
+    $ segd_loop
 
 
 

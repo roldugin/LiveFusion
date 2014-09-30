@@ -28,7 +28,6 @@ import GHC hiding ( Unique, pprExpr ) -- TODO instead import what's needed
 import GHC.Paths -- ( libdir )
 import DynFlags -- ( defaultFatalMessager, defaultFlushOut )
 import Control.Exception
-import Debug.Trace
 import System.IO
 import System.IO.Unsafe
 import System.FilePath
@@ -39,9 +38,6 @@ import Data.List as List
 import Data.Dynamic
 import Control.Arrow ( (>>>) )
 import Language.Haskell.TH ( pprint )
-
-
-tr a = trace (show a) a
 
 uc = unsafeCoerce
 

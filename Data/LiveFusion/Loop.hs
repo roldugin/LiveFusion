@@ -417,6 +417,13 @@ addToInsertTests :: Unique -> Loop -> Loop
 addToInsertTests uq loop = loop { loopInsertTests = uq : loopInsertTests loop }
 
 
+removeFromInsertTests :: Unique -> Loop -> Loop
+removeFromInsertTests uq loop = loop { loopInsertTests = modify $ loopInsertTests loop }
+  where
+    modify tests = delete uq
+                 $ residual tests (loopRates loop)
+
+
 setTheRate :: Unique -> Loop -> Loop
 setTheRate uq loop = loop { loopTheRate = Just uq }
 
@@ -505,12 +512,20 @@ pprLabel = show
 
 
 instance Show Loop where
-  show (Loop loopEntry loopArgs loopArrResult loopScalarResult _ _ _ _ loopBlockMap)
-    = "Loop Entry:    "  ++  maybe "None" pprLabel loopEntry                   ++\
-      "Loop Args:     "  ++  (show $ Map.keys loopArgs)                        ++\
-      "Array Result:  "  ++  maybe "None" (pprVar . arrayVar) loopArrResult    ++\
-      "Scalar Result: "  ++  maybe "None" pprVar              loopScalarResult ++\
-      "BlockMap:      "  ++\ pprBlockMap loopBlockMap
+  show = pprLoop
+
+pprLoop :: Loop -> String
+pprLoop loop
+    = "Loop Entry:    "  ++  maybe "None" pprLabel (loopEntry loop)                   ++\
+      "Loop Args:     "  ++  (show $ Map.keys $ loopArgs loop)                        ++\
+      "Array Result:  "  ++  maybe "None" (pprVar . arrayVar) (loopArrResult loop)    ++\
+      "Scalar Result: "  ++  maybe "None" pprVar              (loopScalarResult loop) ++\
+      "The rate:      "  ++  maybe "None" pprId               (loopTheRate loop)      ++\
+      "Rates:         "  ++  show (loopRates loop)                                    ++\
+      "To insert:" ++\
+      "  Tests:       "  ++  show (loopInsertTests loop)                              ++\
+      "  Inits/Incrs: "  ++  show (loopInsertIncrs loop)                              ++\
+      "BlockMap:      "  ++\ pprBlockMap (loopBlockMap loop)
 
 
 pprVarMap :: VarMap -> String
@@ -819,7 +834,7 @@ insertTests loop = foldl insertTest loop rates
 insertIncrs :: Loop -> Loop
 insertIncrs loop = foldl insertIncr loop rates
  where
-  rates = Rates.residual (loopInsertTests loop) (loopRates loop)
+  rates = Rates.residual (loopInsertIncrs loop) (loopRates loop)
 
   insertIncr loop uq' = addStmt indexInit init_
                       $ addStmt indexIncr bottom_
@@ -919,14 +934,6 @@ append = mappend
 
 emptyLoop :: Loop
 emptyLoop = mempty
-
-
--- | A loop with the default set of basic blocks and control flow.
-defaultLoop :: Id -> Loop
-defaultLoop uq = addDefaultControlFlow uq
-               $ setLoopEntry (initLbl uq)
-               $ touchDefaultBlocks uq
-               $ emptyLoop
 
 
 appendLoopBlockMap :: Block -> Block -> Block
