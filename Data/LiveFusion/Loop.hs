@@ -137,11 +137,15 @@ unsetBlockFinal :: Block -> Block
 unsetBlockFinal (Block stmts _) = Block stmts Nothing
 
 
-rewriteBlockLabels :: [Set Label] -> Block -> Block
-rewriteBlockLabels lbls (Block stmts final) = Block stmts' final'
+rewriteBlockLabelsAndRates :: [Set Label] -> IntDisjointSet -> Block -> Block
+rewriteBlockLabelsAndRates lbls rates (Block stmts final) = Block stmts' final'
   where
-    stmts' = map (rewriteStmtLabels lbls) stmts
-    final' = rewriteStmtLabels lbls <$> final
+    stmts' = map (rewriteStmtRates rates)
+           $ map (rewriteStmtLabels lbls)
+           $ stmts
+    final' = rewriteStmtRates rates
+         <$> rewriteStmtLabels lbls
+         <$> final
 
 
 -------------------------------------------------------------------------------
@@ -212,8 +216,6 @@ sliceArrStmt = SliceArray
 --   elt_3 = f elt_2
 --   goto yield_2    <-- changed
 -- @
-
-
 rewriteStmtLabels :: [Set Label] -> Stmt -> Stmt
 rewriteStmtLabels lbls = go
   where
@@ -223,6 +225,13 @@ rewriteStmtLabels lbls = go
     go (Guard v l)    = Guard v (rw l)
     go (Goto l)       = Goto (rw l)
     go _stmt          = _stmt
+
+
+-- | Similar to @rewriteStmtLabels@ but rewrites index variables
+--
+-- TODO: Matching on variable name is ugly.
+rewriteStmtRates :: IntDisjointSet -> Stmt -> Stmt
+rewriteStmtRates rates = id
 
 
 -------------------------------------------------------------------------------
@@ -735,9 +744,11 @@ extendedEnv loop = purgeBlockLocalVars
 --------------------------------------------------------------------------------
 
 
+
+
 -- | Reduces the minimal set of labels
 postprocessLoop :: Loop -> Loop
-postprocessLoop loop = rewriteLoopLabels
+postprocessLoop loop = rewriteLoopLabelsAndRates
                      $ reorderDecls
                      $ writeResultArray uq
                      $ insertTests
@@ -749,8 +760,10 @@ postprocessLoop loop = rewriteLoopLabels
 
 
 insertTests :: Loop -> Loop
-insertTests loop = foldl insertTest loop (loopInsertTests loop)
+insertTests loop = foldl insertTest loop rates
  where
+  rates = Rates.residual (loopInsertTests loop) (loopRates loop)
+
   insertTest loop uq' = addStmt indexTest guard_
                       $ loop
    where
@@ -767,8 +780,10 @@ insertTests loop = foldl insertTest loop (loopInsertTests loop)
 
 
 insertIncrs :: Loop -> Loop
-insertIncrs loop = foldl insertIncr loop (loopInsertIncrs loop)
+insertIncrs loop = foldl insertIncr loop rates
  where
+  rates = Rates.residual (loopInsertTests loop) (loopRates loop)
+
   insertIncr loop uq' = addStmt indexInit init_
                       $ addStmt indexIncr bottom_
                       $ loop
@@ -784,14 +799,15 @@ insertIncrs loop = foldl insertIncr loop (loopInsertIncrs loop)
     bottom_   = bottomLbl uq
 
 
-rewriteLoopLabels :: Loop -> Loop
-rewriteLoopLabels loop
+rewriteLoopLabelsAndRates :: Loop -> Loop
+rewriteLoopLabelsAndRates loop
   = loop { loopBlockMap = newBlockMap
          , loopEntry    = newEntry }
   where
     lbls = AMap.keys $ loopBlockMap loop
     newEntry = theSynonymLabel lbls <$> loopEntry loop
-    newBlockMap = AMap.map (rewriteBlockLabels lbls) (loopBlockMap loop)
+    rates = loopRates loop
+    newBlockMap = AMap.map (rewriteBlockLabelsAndRates lbls rates) (loopBlockMap loop)
 
 
 writeResultArray :: Unique -> Loop -> Loop
