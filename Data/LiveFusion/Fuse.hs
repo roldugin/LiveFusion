@@ -208,38 +208,43 @@ filterG uq p arr_loop = loop
 
 scanG uq f z arr_loop = loop
  where
-  arr_uq    = getJustRate arr_loop
-  aVar      = eltVar arr_uq
+  arr_uq     = getJustRate arr_loop
+  aVar       = eltVar arr_uq
+  bVar       = eltVar uq
+  zVar       = var "z" uq
+  accVar     = var "acc" uq                -- accumulator
 
-  -- INIT
-  zVar      = var "z" uq
-  zBind     = bindStmt zVar (TermE z)
-  accVar    = var "acc" uq                -- accumulator
-  accInit   = bindStmt accVar (VarE zVar) -- accumulator initialization
-  initStmts = [zBind, accInit]
-  -- BODY
-  bVar      = eltVar uq
-  bBind     = bindStmt bVar (VarE accVar) -- resulting element is current accumulator
-  bodyStmts = [bBind]
-  -- BOTTOM
-  -- Binding for `f`
-  fVar      = var "f" uq            -- name of function to apply
-  fBody     = TermE (lam2 f)        -- f's body in HOAS representation
-  fBind     = bindStmt fVar fBody   -- f = <HOAS.Term>  
-  fApp      = (varE fVar) `AppE` (varE accVar) `AppE` (varE aVar)
-  accUpdate = assignStmt accVar fApp
-  botStmts  = [fBind, accUpdate]
-  -- LOOP
-  loop      = setArrResult uq
-            $ setScalarResult accVar
-            -- $ addArg zVar (toDyn z)
-            $ addStmts initStmts (initLbl uq)
-            $ addStmts bodyStmts (bodyLbl uq)
-            $ addStmts botStmts  (bottomLbl uq)
-            $ rebindIndexAndLengthVars uq arr_uq
-            -- $ addDefaultControlFlow uq
-            $ addDefaultSynonymLabels uq arr_uq
-            $ arr_loop
+  -- init
+  zBind      = bindStmt zVar (TermE z)
+  accInit    = bindStmt accVar (VarE zVar) -- accumulator initialization
+  init_stmts = [zBind, accInit]
+
+  -- body
+  bBind      = bindStmt bVar (VarE accVar)  -- resulting element is current accumulator
+  body_stmts = [bBind]
+
+  -- bottom
+  fApp       = fun2 f accVar aVar
+  accUpdate  = assignStmt accVar fApp
+  bottom_stmts = [accUpdate]
+
+  -- labels
+  init_      = initLbl uq
+  body_      = bodyLbl uq
+  bottom_    = bottomLbl uq
+  
+  -- THE loop
+  loop       = setTheRate uq
+  	         $ setArrResult uq
+  	         $ setScalarResult accVar
+  	         $ addStmts init_stmts init_
+             $ addStmts body_stmts body_
+             $ addStmts bottom_stmts bottom_
+             $ reuseRate                uq arr_uq
+             $ rebindLengthVar          uq arr_uq
+             $ addDefaultSynonymLabels  uq arr_uq
+             $ setTheRate uq
+             $ arr_loop
 
 
 fold_sG uq f z segd_loop data_loop = loop
