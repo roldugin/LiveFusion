@@ -48,6 +48,8 @@ fuse env node uq = fuse' node uq
     arr_loop = fuse' arr uq
     z'       = getScalar z uq
 
+  fuse' (ReplicateG n x) uq = replicateG uq n x
+  
   -- See comment [1] at the bottom of the file
   fuse' (Fold_sG f z segd dat) uq = fold_sG uq f z' segd_loop data_loop
    where
@@ -434,6 +436,29 @@ indices_sG uq len segd_loop = loop
 
   -- This is the loop that runs at the rate of output data
   result_loop = producerLoop uq
+
+
+replicateG uq n x = loop
+ where
+  -- init_result
+  lenVar     = lengthVar uq    
+  lenBind    = bindStmt lenVar (TermE n)
+  init_stmts = [lenBind]
+
+  -- body_result
+  xVar       = eltVar uq
+  xBind      = bindStmt xVar (TermE x)
+  body_stmts = [xBind]
+
+  -- some label names
+  init_ = initLbl uq
+  body_ = bodyLbl uq
+
+  -- THE loop
+  loop      = setArrResult uq
+            $ addStmts init_stmts init_
+            $ addStmts body_stmts body_
+            $ producerLoop uq
 
 
 -- | Create a loop to be used by a produces.

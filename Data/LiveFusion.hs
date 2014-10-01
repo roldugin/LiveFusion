@@ -8,7 +8,7 @@ import Data.LiveFusion.Scalar.HOAS
 
 import Data.LiveFusion.HsBackend.Prelude
 
-import Prelude hiding ( map, filter, zipWith, zipWith3, zip )
+import Prelude hiding ( map, filter, zipWith, zipWith3, zip, replicate )
 
 import Data.Vector.Unboxed as V ( toList, fromList, (!) )
 import GHC.Exts
@@ -32,6 +32,9 @@ fold f z arr = evalAST $ Fold f (Scalar z) arr
 
 scan :: Elt a => (Term a -> Term a -> Term a) -> Term a -> Array a -> Array a
 scan f z arr = Scan f (Scalar z) arr
+
+replicate :: Elt a => Term Int -> Term a -> Array a
+replicate n x = Replicate n x
 
 scan_s :: Elt a => (Term a -> Term a -> Term a) -> Term a -> Array Int -> Array a -> Array a
 scan_s f z segd arr = Scan_s f (Scalar z) segd arr

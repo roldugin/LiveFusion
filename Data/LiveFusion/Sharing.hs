@@ -71,6 +71,12 @@ data ASG e s where
             -> ArrayASG a s
             -> ArrayASG a s
 
+  ReplicateG
+            :: Elt a
+            => Term Int
+            -> Term a
+            -> ArrayASG a s
+
   ManifestG :: Elt a
             => V.Vector a
             -> ArrayASG a s
@@ -150,6 +156,9 @@ instance Typeable e => MuRef (AST e) where
         = ScanG f
           <$> (VarG <$> ap z)
           <*> (VarG <$> ap arr)
+
+      mapDeRef' ap (Replicate n x)
+        = pure $ ReplicateG n x
 
       mapDeRef' ap (Fold_s f z lens arr)
         = Fold_sG f

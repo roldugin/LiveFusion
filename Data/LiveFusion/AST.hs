@@ -49,6 +49,12 @@ data AST e where
            -> ArrayAST a
            -> ArrayAST a
 
+  Replicate
+           :: Elt a
+           => Term Int
+           -> Term a
+           -> ArrayAST a
+
   Fold_s   :: Elt a
            => (Term a -> Term a -> Term a)
            -> ScalarAST a
