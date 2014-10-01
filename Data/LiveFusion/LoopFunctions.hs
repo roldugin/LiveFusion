@@ -18,7 +18,8 @@ freshRate rate loop = loop { loopRates = insert rate (loopRates loop) }
 
 -- | A loop with the default set of basic blocks and control flow.
 defaultLoop :: Id -> Loop
-defaultLoop uq = freshRate uq
+defaultLoop uq = setTheRate uq
+               $ freshRate uq
                $ addDefaultControlFlow uq
                $ setLoopEntry (initLbl uq)
                $ touchDefaultBlocks uq

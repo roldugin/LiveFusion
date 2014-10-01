@@ -431,7 +431,8 @@ setTheRate uq loop = loop { loopTheRate = Just uq }
 getJustRate :: Loop -> Unique
 getJustRate loop = fromMaybe err (loopTheRate loop)
   where
-    err = error "getJustRate: This loop does not have the rate set."
+    err = error 
+        $ "getJustRate: This loop does not have the rate set." ++\ pprLoop loop
 
 
 

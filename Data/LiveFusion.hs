@@ -34,10 +34,14 @@ scan :: Elt a => (Term a -> Term a -> Term a) -> Term a -> Array a -> Array a
 scan f z arr = Scan f (Scalar z) arr
 
 scan_s :: Elt a => (Term a -> Term a -> Term a) -> Term a -> Array Int -> Array a -> Array a
-scan_s f z arr = Scan_s f (Scalar z) arr
+scan_s f z segd arr = Scan_s f (Scalar z) segd arr
 
 fold_s :: Elt a => (Term a -> Term a -> Term a) -> Term a -> Array Int -> Array a -> Array a
-fold_s f z arr = Fold_s f (Scalar z) arr
+fold_s f z segd arr = Fold_s f (Scalar z) segd arr
+
+replicate_s :: Elt a => Term Int -> Array Int -> Array a -> Array a
+replicate_s len segd arr = Replicate_s len segd arr
+
 
 -- | Indexing
 --

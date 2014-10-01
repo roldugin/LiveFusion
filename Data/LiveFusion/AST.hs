@@ -65,7 +65,7 @@ data AST e where
 
   Replicate_s
            :: Elt a
-           => Int
+           => Term Int
            -> ArrayAST Int
            -> ArrayAST a
            -> ArrayAST a

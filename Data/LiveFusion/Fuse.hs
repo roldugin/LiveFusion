@@ -12,7 +12,7 @@ import Data.LiveFusion.Util
 
 import Data.Dynamic
 import Data.List as List
-import Data.Map as Map hiding ( map, filter )
+import Data.Map as Map hiding ( map, filter, foldr )
 import Data.Maybe
 import Data.Typeable
 
@@ -61,7 +61,11 @@ fuse env node uq = fuse' node uq
     segd_loop = fuse' segd uq
     z'        = getScalar z uq
 
-  fuse' (Replicate_sG len segd arr) uq = undefined
+  fuse' (Replicate_sG len segd dat) uq = replicate_sG uq len segd_loop data_loop
+   where
+   	data_loop = fuse' dat uq
+   	segd_loop = fuse' segd uq
+
 
   -- | We store scalars in AST/ASG however, we're not yet clever about computing them.
   --   For not we assume that any scalar AST could only be constructed using Scalar constructor
@@ -100,10 +104,7 @@ manifestG uq vec = loop
   loop       = addArg   arrVar (toDyn vec)
              $ addStmts init_stmts init_
              $ addStmts body_stmts body_
-             $ addToInsertTests uq
-             $ addToInsertIncrs uq
-             $ setTheRate uq
-             $ defaultLoop uq
+             $ producerLoop uq
 
 
 mapG uq f arr_loop = loop
@@ -156,15 +157,7 @@ zipWithG uq f arr_loop brr_loop = loop
              $ setTheRate uq
              $ abrr_loop
 
-  -- First separately unite uq/arr_uq and uq/brr_uq
-  -- so they know how to merge into one loop.
-  arr_loop'  = reuseRate               uq arr_uq
-  	         $ addDefaultSynonymLabels uq arr_uq
-  	         $ arr_loop
-  brr_loop'  = reuseRate               uq brr_uq
-             $ addDefaultSynonymLabels uq brr_uq
-             $ brr_loop
-  abrr_loop  = arr_loop' `Loop.append` brr_loop'
+  abrr_loop  = mergeLoops uq [arr_loop, brr_loop]
 
 
 filterG uq p arr_loop = loop
@@ -308,7 +301,7 @@ scan_sG uq f z segd_loop data_loop = loop
   segd_uq   = getJustRate segd_loop
   data_uq   = getJustRate data_loop
 
-  aVar      = eltVar data_uq           -- an element from data dataay
+  aVar      = eltVar data_uq           -- an element from data array
 
   -- init_segd (run once)
   zVar      = var "z" uq
@@ -353,6 +346,78 @@ scan_sG uq f z segd_loop data_loop = loop
                            data_loop
                            data_uq {- new rate: -}
                            uq      {- new id: -}
+
+
+-- | Both segd_loop and elts_loop run at the rate of segd.
+--   The resulting result_loop is an entirely new loop with a much higher rate.
+--   This is why we rely on the length hint to allocate an array of the right size.
+replicate_sG uq len segd_loop elts_loop = loop
+ where
+  segd_uq   = getJustRate segd_loop
+  elts_uq   = getJustRate elts_loop
+  result_uq = getJustRate result_loop
+
+  -- init_result
+  resLenVar = lengthVar result_uq    
+  resLenBind= bindStmt resLenVar (TermE len)
+  init_result_stmts = [resLenBind]
+
+  -- body_result
+  -- TODO: Check if optimised away. If not, move to body_source.
+  aVar      = eltVar elts_uq           -- an element from data arraay
+  bVar      = eltVar result_uq
+  bBind     = bindStmt bVar (VarE aVar)
+  body_result_stmts = [bBind]
+
+  -- some label names
+  init_result = initLbl result_uq
+  body_result = bodyLbl result_uq
+
+  -- THE loop
+  loop      = setArrResult uq
+            $ addStmts init_result_stmts init_result
+            $ addStmts body_result_stmts body_result
+            $ nested_loops
+
+  nested_loops = nestLoops source_loop
+                           result_loop
+                           result_uq {- new rate: -}
+                           uq        {- new id: -}
+
+  -- This is the loop that runs at the rate of output data
+  result_loop = producerLoop uq
+
+  -- Merge segd and element loops, make it have segd_uq rate
+  source_loop = mergeLoops segd_uq [segd_loop, elts_loop]
+
+
+-- | Create a loop to be used by a produces.
+--
+-- Used by manifest, replicate, enum, etc..
+producerLoop :: Unique -> Loop
+producerLoop uq = addToInsertTests uq
+                $ addToInsertIncrs uq
+                $ defaultLoop uq
+
+
+-- | Merges a number of loops to run together in a lock-step.
+--
+-- Used by zipN, zipWithN, replicate_s, enum_s
+mergeLoops :: Unique -> [Loop] -> Loop
+mergeLoops _ []
+  = error "mergeLoops: List of loops to merge must not be empty."
+mergeLoops new_uq loops
+  = setTheRate new_uq
+  $ foldl1 Loop.append
+  $ map prepare loops
+  where
+    -- First separately unite unite rates/labels with uq
+    -- so they know how to merge into one loop.
+    prepare loop
+      = let loop_uq = getJustRate loop
+        in  reuseRate                 new_uq loop_uq
+  	        $ addDefaultSynonymLabels new_uq loop_uq
+  	        $ loop
 
 
 -- | Adds predefined control flow for nested loops.

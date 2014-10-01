@@ -95,7 +95,7 @@ data ASG e s where
 
   Replicate_sG
             :: Elt a
-            => Int
+            => Term Int
             -> ArrayASG Int s
             -> ArrayASG a s
             -> ArrayASG a s
