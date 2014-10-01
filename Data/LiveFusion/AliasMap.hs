@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 module Data.LiveFusion.AliasMap where
 
 import Control.Arrow ( first, second )
@@ -169,7 +170,7 @@ mergeWithKeys2 f f1 f2 m1 m2 = go m1 m2
   where
     go m1 [] = f1 m1
     go [] m2 = f2 m2
-    go st1 st2
+    go _st1 _st2
       = let (only1, both) = process1 m1 m2
             (only2, _)    = process2 m1 m2
         in  (f1 only1) ++ both ++ (f2 only2)
