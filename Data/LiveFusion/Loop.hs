@@ -266,6 +266,37 @@ rewriteStmtRates rates = mapVars rw
     rw v_ = v_
 
 
+-- | Two statement are considered to be clashing if they bind the same variable.
+clash :: Stmt -> Stmt -> Bool
+clash s1 s2 = fromMaybe False clash'
+  where
+    clash' = do 
+               v1 <- binds s1
+               v2 <- binds s2
+               return (v1 == v2)
+
+
+binds :: Stmt -> Maybe Var
+binds = go
+  where
+    go (Bind v _) = Just v
+    {-
+    go (Assign v e)
+    go (Case e l1 l2)
+    go (Guard e l)
+    go (Goto l)
+    go (Return e)
+    -}
+    go (NewArray v _) = Just v
+    go (ReadArray v _ _) = Just v
+    {-
+    go (WriteArray v ei ex)
+    -}
+    go (ArrayLength v _) = Just v
+    go (SliceArray v _ _) = Just v
+    go _ = Nothing
+
+
 -------------------------------------------------------------------------------
 -- * Loops
 
@@ -294,6 +325,7 @@ data Loop = Loop { -- | Loop entry block
                    -- | Guard tests and increments that need to be inserted
                  , loopInsertIncrs  :: [Unique]  -- These are for the postprocessing step
                  , loopInsertTests  :: [Unique]  -- and should probably be dealt with more elegantly.
+                 , loopNoInsertTests :: [Unique]
 
 
                    -- | Loop's basic blocks with their associated labels
@@ -413,10 +445,7 @@ addToInsertTests uq loop = loop { loopInsertTests = uq : loopInsertTests loop }
 
 
 removeFromInsertTests :: Unique -> Loop -> Loop
-removeFromInsertTests uq loop = loop { loopInsertTests = modify $ loopInsertTests loop }
-  where
-    modify tests = delete uq
-                 $ residual tests (loopRates loop)
+removeFromInsertTests uq loop = loop { loopNoInsertTests = uq : loopNoInsertTests loop }
 
 
 setTheRate :: Unique -> Loop -> Loop
@@ -517,10 +546,11 @@ pprLoop loop
       "Array Result:  "  ++  maybe "None" (pprVar . arrayVar) (loopArrResult loop)    ++\
       "Scalar Result: "  ++  maybe "None" pprVar              (loopScalarResult loop) ++\
       "The rate:      "  ++  maybe "None" pprId               (loopTheRate loop)      ++\
-      "Rates:         "  ++  show (loopRates loop)                                    ++\
+      "Rates:         "  ++  pprDisjointSet (loopRates loop)                          ++\
       "To insert:" ++\
-      "  Tests:       "  ++  show (loopInsertTests loop)                              ++\
       "  Inits/Incrs: "  ++  show (loopInsertIncrs loop)                              ++\
+      "  Tests:       "  ++  show (loopInsertTests loop)                              ++\
+      "  Except:      "  ++  show (loopNoInsertTests loop)                            ++\
       "BlockMap:      "  ++\ pprBlockMap (loopBlockMap loop)
 
 
@@ -616,6 +646,7 @@ touchBlock label loop = updateBlock label id {-do nothing-} loop
 postprocessLoop :: Loop -> Loop
 postprocessLoop loop = rewriteLoopLabelsAndRates
                      $ reorderDecls
+                     $ removeClashingStmts
                      $ writeResultArray uq
                      $ insertTests
                      $ insertIncrs
@@ -626,9 +657,11 @@ postprocessLoop loop = rewriteLoopLabelsAndRates
 
 
 insertTests :: Loop -> Loop
-insertTests loop = foldl insertTest loop rates
+insertTests loop = foldl insertTest loop toInsert
  where
-  rates = Rates.residual (loopInsertTests loop) (loopRates loop)
+  toInsert = yes \\ no
+  yes = Rates.residual (loopInsertTests loop) (loopRates loop)
+  no  = Rates.residual (loopNoInsertTests loop) (loopRates loop)
 
   insertTest loop uq' = addStmt indexTest guard_
                       $ loop
@@ -721,9 +754,22 @@ reorderDecls loop = loop { loopBlockMap = AMap.map perblock (loopBlockMap loop) 
     isDecl _            = False
 
 
+-- | Sometimes multiple binings of the same variable get generated.
+--
+-- For example when fusing @zipWith f xs xs@, two duplicate length and element
+-- bindings will appear for each of the @xs@.
+--
+-- Note that it doesn't touch the final stmt
+-- TODO: Abstract traversal into mapBlocks
+removeClashingStmts :: Loop -> Loop
+removeClashingStmts loop = loop { loopBlockMap = AMap.map perblock (loopBlockMap loop) }
+  where
+    perblock (Block stmts final) = Block (nubBy clash stmts) final
+
+
 {- loopEntry, loopArgs, loopArrResult, loopScalarResult, loopTheRate, loopRates, loopInsertIncrs, loopInsertTests, loopBlockMap -}
 instance Monoid Loop where
-  mempty = Loop Nothing Map.empty Nothing Nothing Nothing Rates.empty [] [] AMap.empty
+  mempty = Loop Nothing Map.empty Nothing Nothing Nothing Rates.empty [] [] [] AMap.empty
   mappend loop1 loop2
     = Loop { loopEntry        = loopEntry    `joinWith` (<|>)
            , loopArgs         = loopArgs     `joinWith` Map.union
@@ -731,8 +777,9 @@ instance Monoid Loop where
            , loopScalarResult = Nothing
            , loopTheRate      = loopTheRate  `joinWith` (<|>)
            , loopRates        = loopRates    `joinWith` Rates.merge
-           , loopInsertIncrs  = loopInsertTests `joinWith` (++)
-           , loopInsertTests  = loopInsertIncrs `joinWith` (++)
+           , loopInsertIncrs  = loopInsertTests   `joinWith` (++)
+           , loopInsertTests  = loopInsertIncrs   `joinWith` (++)
+           , loopNoInsertTests= loopNoInsertTests `joinWith` (++)
            , loopBlockMap     = loopBlockMap `joinWith` AMap.unionWith appendLoopBlockMap
            }
     where

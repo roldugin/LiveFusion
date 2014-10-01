@@ -3,12 +3,14 @@ module Data.LiveFusion.DisjointSet
 	, merge
 	, unionInsert
 	, representative
-	, residual ) where
+	, residual
+	, subsets
+	, pprDisjointSet ) where
 
 import Data.LiveFusion.Util
 
 import Data.IntDisjointSet hiding ( map )
-import Data.List ( nub )
+import Data.List ( nub, sortBy, groupBy, sort )
 import Data.Maybe
 import Prelude hiding ( lookup )
 
@@ -37,3 +39,18 @@ representative n set = fromMaybe err (fst $ lookup n set)
 -- Note: All elements must be present in the set, otherwise the function will fail.
 residual :: [Int] -> IntDisjointSet -> [Int]
 residual list set = nub $ map (\x -> representative x set) list
+
+
+subsets :: IntDisjointSet -> [[Int]]
+subsets = sort
+	    . map (map fst)
+	    . groupBy eqSnds
+	    . sortBy cmpSnds
+        . fst . toList
+  where
+  	cmpSnds (_,x) (_,y) = compare x y
+  	eqSnds  (_,x) (_,y) = x == y
+
+
+pprDisjointSet :: IntDisjointSet -> String
+pprDisjointSet = show . subsets
