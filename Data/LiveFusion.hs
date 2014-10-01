@@ -42,6 +42,8 @@ fold_s f z segd arr = Fold_s f (Scalar z) segd arr
 replicate_s :: Elt a => Term Int -> Array Int -> Array a -> Array a
 replicate_s len segd arr = Replicate_s len segd arr
 
+indices_s :: Term Int -> Array Int -> Array Int
+indices_s len segd = Indices_s len segd
 
 -- | Indexing
 --

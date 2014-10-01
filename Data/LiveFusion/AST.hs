@@ -70,6 +70,11 @@ data AST e where
            -> ArrayAST a
            -> ArrayAST a
 
+  Indices_s
+           :: Term Int
+           -> ArrayAST Int
+           -> ArrayAST Int
+
   Manifest :: Elt a
            => V.Vector a
            -> ArrayAST a

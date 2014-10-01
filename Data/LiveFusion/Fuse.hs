@@ -66,6 +66,10 @@ fuse env node uq = fuse' node uq
    	data_loop = fuse' dat uq
    	segd_loop = fuse' segd uq
 
+  fuse' (Indices_sG len segd) uq = indices_sG uq len segd_loop
+   where
+   	segd_loop = fuse' segd uq
+
 
   -- | We store scalars in AST/ASG however, we're not yet clever about computing them.
   --   For not we assume that any scalar AST could only be constructed using Scalar constructor
@@ -389,6 +393,47 @@ replicate_sG uq len segd_loop elts_loop = loop
 
   -- Merge segd and element loops, make it have segd_uq rate
   source_loop = mergeLoops segd_uq [segd_loop, elts_loop]
+
+
+indices_sG uq len segd_loop = loop
+ where
+  segd_uq   = getJustRate segd_loop
+  result_uq = getJustRate result_loop
+
+  bVar      = eltVar result_uq  -- result array variable
+
+  -- init_result
+  resLenVar = lengthVar result_uq    
+  resLenBind= bindStmt resLenVar (TermE len)
+  init_result_stmts = [resLenBind]
+
+  -- body_segd (reset index counter)
+  bReset    = bindStmt bVar zeroE
+  body_segd_stmts = [bReset]
+
+  -- bottom_result (increment counter)
+  bIncr     = incStmt bVar
+  bottom_result_stmts = [bIncr]
+
+  -- some label names
+  init_result   = initLbl result_uq
+  bottom_result = bottomLbl result_uq
+  body_segd     = bodyLbl segd_uq
+
+  -- THE loop
+  loop      = setArrResult uq
+            $ addStmts init_result_stmts init_result
+            $ addStmts bottom_result_stmts bottom_result
+            $ addStmts body_segd_stmts body_segd
+            $ nested_loops
+
+  nested_loops = nestLoops segd_loop
+                           result_loop
+                           result_uq {- new rate: -}
+                           uq        {- new id: -}
+
+  -- This is the loop that runs at the rate of output data
+  result_loop = producerLoop uq
 
 
 -- | Create a loop to be used by a produces.

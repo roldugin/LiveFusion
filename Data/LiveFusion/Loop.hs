@@ -78,18 +78,11 @@ resultVar :: Var
 resultVar = SimplVar resultPrefix
 
 
-eltPrefix = "elt"
-indexPrefix = "ix"
+eltPrefix    = "elt"
+indexPrefix  = "ix"
 lengthPrefix = "len"
-arrayPrefix = "arr"
+arrayPrefix  = "arr"
 resultPrefix = "result"
-
-
--- TODO These are all kinda hacky. We should use the Term language here.
-ltFn = SimplVar "(<)"
-plusFn = SimplVar "(+)"
-lengthFn = SimplVar "arrayLength"
-readFn = SimplVar "readArray"
 
 
 -- For easier language tree traversal
@@ -115,8 +108,10 @@ incStmt v = assignStmt v incExpr
     incExpr  = plusIntE `AppE` vE `AppE` oneE
     plusIntE = TermE (lam2 plusInt)
     vE       = varE v
-    oneE     = TermE (1 :: Term Int)
 
+zeroE, oneE :: Expr
+zeroE = TermE (0 :: Term Int)
+oneE  = TermE (1 :: Term Int)
 
 -------------------------------------------------------------------------------
 -- * Blocks

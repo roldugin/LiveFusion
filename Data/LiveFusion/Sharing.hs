@@ -100,6 +100,11 @@ data ASG e s where
             -> ArrayASG a s
             -> ArrayASG a s
 
+  Indices_sG
+            :: Term Int
+            -> ArrayASG Int s
+            -> ArrayASG Int s
+
   VarG      :: Typeable e
             => s
             -> ASG e s
@@ -162,6 +167,10 @@ instance Typeable e => MuRef (AST e) where
         = Replicate_sG len
           <$> (VarG <$> ap segd)
           <*> (VarG <$> ap arr)
+
+      mapDeRef' ap (Indices_s len segd)
+        = Indices_sG len
+          <$> (VarG <$> ap segd)
 
       mapDeRef' ap (Manifest vec)
         = pure $ ManifestG vec
