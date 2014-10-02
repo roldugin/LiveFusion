@@ -32,7 +32,7 @@ instance IsNum a => Num (Term a) where
 plusTerm, timesTerm, minusTerm :: IsNum a => Term a -> Term a -> Term a
 plusTerm x y = (code plusImpl) `app` x `app` y
 timesTerm x y = (code timesImpl) `app` x `app` y
-minusTerm x y = (code timesImpl) `app` x `app` y
+minusTerm x y = (code minusImpl) `app` x `app` y
 
 negateTerm :: IsNum a => Term a -> Term a
 negateTerm x = (code negateImpl) `app` x
