@@ -85,9 +85,16 @@ arrayPrefix  = "arr"
 resultPrefix = "result"
 
 
--- For easier language tree traversal
+-- Type classes for easier language tree traversal
 class Construct c where
   mapVars :: (Var -> Var) -> c -> c
+--mapLabels :: (Label -> Label) -> c -> c
+
+
+class Analyse construct where
+  binds      :: construct -> [Var]
+  references :: construct -> [Var]
+
 
 
 -------------------------------------------------------------------------------
@@ -271,13 +278,33 @@ clash :: Stmt -> Stmt -> Bool
 clash s1 s2 = fromMaybe False clash'
   where
     clash' = do 
-               v1 <- binds s1
-               v2 <- binds s2
+               v1 <- bindsMb s1
+               v2 <- bindsMb s2
                return (v1 == v2)
 
 
-binds :: Stmt -> Maybe Var
-binds = go
+instance Analyse Stmt where
+  binds = maybeToList . bindsMb
+  references = go
+   where
+    go (Bind _ e)   = references e
+    go (Assign _ e) = references e
+    go (Case e _ _) = references e
+    go (Guard e _)  = references e
+    go (Goto _)     = []
+    go (Return e)   = references e
+
+    go (NewArray _ e)       = references e
+    go (ReadArray _ v e)    = v : references e
+    go (WriteArray v ei ex) = v : references ei
+                               ++ references ex
+    go (ArrayLength _ v)    = [v]
+    go (SliceArray _ v e)   = v : references e
+
+
+
+bindsMb :: Stmt -> Maybe Var
+bindsMb = go
   where
     go (Bind v _) = Just v
     {-
@@ -295,6 +322,52 @@ binds = go
     go (ArrayLength v _) = Just v
     go (SliceArray v _ _) = Just v
     go _ = Nothing
+
+
+-- | Dependency order of two statements.
+--
+-- Currently two statements are equal if they:
+-- 
+--   * don't depend on each other, and
+--
+--   * either both bind a variable
+--
+--   * or both don't bind a variable
+--
+-- The equality is in terms of where to place the statement.
+-- This is different from complete equality of even /clashing/
+-- where two statements bind the same variable. See @clash@.
+orderStmts :: Stmt -> Stmt -> Ordering
+orderStmts s1 s2 = ord mbv1 mbv2
+ where
+  ord Nothing   Nothing   = EQ  -- No dep since they don't bind vars
+  ord (Just v1) Nothing   = LT  -- Binding statements have precedence
+  ord Nothing   (Just v2) = GT  -- ^^^
+  ord (Just v1) (Just v2)       -- Both statements are binding:
+    | v1 `elem` refs2 = LT      --  * s2 depends on s1
+    | v2 `elem` refs1 = GT      --  * s1 depends on s2
+    | otherwise       = EQ      --  * neither
+
+  -- *Maybe* they bind variables
+  mbv1  = bindsMb s1
+  mbv2  = bindsMb s2
+  
+  -- Variables they reference  
+  refs1 = references s1
+  refs2 = references s2
+
+{- PROBLEM with `sortBy orderStmtms`:
+Partial ordering does not seem to work properly because we use EQ Ordering
+to mean there's no dependence relation between two statements.
+
+In particualar the map is the following breaks it and stuff doesn't compile:
+bpermute (map (+1) [0,1,2,3,4,5,6,7,8,9]) [3,2,6,8,5,3]
+
+Sorting the following does nothing:
+C := B                           B := A
+D := C    = should produce =>    C := B
+B := A                           D := C
+-}
 
 
 -------------------------------------------------------------------------------
@@ -740,14 +813,7 @@ reorderDecls loop = loop { loopBlockMap = AMap.map perblock (loopBlockMap loop) 
   where
     perblock (Block stmts final) = Block (reorder stmts) final
 
-    reorder = uncurry (++)
-            . partition isDecl
-
-    isDecl (Bind   _ _)      = True
-    isDecl (Assign _ _)      = True
-    isDecl (ReadArray _ _ _) = True
-    isDecl (ArrayLength _ _) = True
-    isDecl _            = False
+    reorder = sortBy orderStmts
 
 
 -- | Sometimes multiple binings of the same variable get generated.
@@ -830,6 +896,15 @@ instance Construct Expr where
     go (VarE v) = VarE (f v)
     go (AppE e1 e2) = AppE (mapVars f e1) (mapVars f e2)
     go e_ = e_
+
+
+instance Analyse Expr where
+  binds _ = []
+  references = go
+   where
+    go (VarE v) = [v]
+    go (AppE e1 e2) = go e1 `List.union` go e2
+    go _ = []
 
 
 vAppE :: Var -> Var -> Expr
