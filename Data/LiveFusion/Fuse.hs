@@ -39,6 +39,16 @@ fuse env node uq = fuse' node uq
     arr_loop = fuse' arr uq
     brr_loop = fuse' brr uq
 
+  fuse' (ZipWith6G f arr brr crr drr err frr) uq
+    = zipWith6G uq f arr_loop brr_loop crr_loop drr_loop err_loop frr_loop
+   where
+    arr_loop = fuse' arr uq
+    brr_loop = fuse' brr uq
+    crr_loop = fuse' crr uq
+    drr_loop = fuse' drr uq
+    err_loop = fuse' err uq
+    frr_loop = fuse' frr uq
+
   fuse' (FilterG p arr) uq = filterG uq p arr_loop
    where
     arr_loop = fuse' arr uq
@@ -170,6 +180,30 @@ zipWithG uq f arr_loop brr_loop = loop
              $ abrr_loop
 
   abrr_loop  = mergeLoops uq [arr_loop, brr_loop]
+
+
+zipWith6G uq f al bl cl dl el fl = loop
+ where
+  e loop     = eltVar $ getJustRate loop    -- to get eltVar of a loop
+  a_uq       = getJustRate al
+
+  -- body
+  fApp       = fun6 f (e al) (e bl) (e cl) (e dl) (e el) (e fl)
+  gVar       = eltVar uq
+  gBind      = bindStmt gVar fApp
+  body_stmts = [gBind]
+
+  -- labels
+  body_      = bodyLbl uq
+
+  -- THE loop
+  loop       = setArrResultOnly uq
+             $ addStmts body_stmts body_
+             $ rebindLengthVar uq a_uq -- be careferul!
+             $ setTheRate uq
+             $ afrr_loop
+
+  afrr_loop  = mergeLoops uq [al, bl, cl, dl, el, fl]
 
 
 filterG uq p arr_loop = loop

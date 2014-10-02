@@ -61,7 +61,8 @@ app = App
 lam2 f = lam $ \x -> lam $ \y -> f x y
 lam3 f = lam $ \x -> lam $ \y -> lam $ \z -> f x y z
 lam4 f = lam $ \x -> lam $ \y -> lam $ \z -> lam $ \w -> f x y z w
-
+lam5 f = lam $ \x -> lam $ \y -> lam $ \z -> lam $ \w -> lam $ \v -> f x y z w v
+lam6 f = lam $ \x -> lam $ \y -> lam $ \z -> lam $ \w -> lam $ \v -> lam $ \u -> f x y z w v u
 
 -- A term interpreter for closed terms
 --

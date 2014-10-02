@@ -32,6 +32,16 @@ data AST e where
            -> ArrayAST b
            -> ArrayAST c
 
+  ZipWith6 :: (Elt a, Elt b, Elt c, Elt d, Elt e, Elt f, Elt g)
+           => (Term a -> Term b -> Term c -> Term d -> Term e -> Term f -> Term g)
+           -> ArrayAST a
+           -> ArrayAST b
+           -> ArrayAST c
+           -> ArrayAST d
+           -> ArrayAST e
+           -> ArrayAST f
+           -> ArrayAST g
+
   Zip      :: (Elt a, Elt b)
            => ArrayAST a
            -> ArrayAST b

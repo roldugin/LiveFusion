@@ -597,7 +597,6 @@ pprStmt (WriteArray arr i x)    = "writeArray" +-+ pprVar arr +-+ pprExpr i +-+ 
 pprStmt (ArrayLength i arr)     = "let" +-+ pprVar i +-+ "= arrayLength" +-+ pprVar arr
 pprStmt (SliceArray arr' arr n) = "let" +-+ pprVar arr' +-+ "= sliceArray" +-+ pprVar arr +-+ pprExpr n
 pprStmt (Return e)     = "return" +-+ pprExpr e
-pprStmt _              = "pprStmt: Unknown Statement"
 
 
 pprLabel :: Label -> String
@@ -923,6 +922,15 @@ fun1 f x = (TermE (lam f)) `AppE` (VarE x)
 -- | Shorthand for applying a 2-argument function to a var.
 fun2 :: (Elt a, Elt b, Elt c) => (Term a -> Term b -> Term c) -> Var -> Var -> Expr
 fun2 f x y = (TermE (lam2 f)) `AppE` (VarE x) `AppE` (VarE y)
+
+
+fun6 :: (Elt a, Elt b, Elt c, Elt d, Elt e, Elt f, Elt g)
+     => (Term a -> Term b -> Term c -> Term d -> Term e -> Term f -> Term g)
+     -> Var -> Var -> Var -> Var -> Var -> Var -> Expr
+fun6 fun a b c d e f = foldl apply (TermE (lam6 fun)) [a,b,c,d,e,f]
+  where 
+    apply :: Expr -> Var -> Expr
+    apply e v = e `AppE` (VarE v)
 
 
 constE :: (THElt e, Elt e) => e -> Expr

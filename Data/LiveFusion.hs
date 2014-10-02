@@ -24,6 +24,11 @@ filter p = Filter p
 zipWith :: (Elt a, Elt b, Elt c) => (Term a -> Term b -> Term c) -> Array a -> Array b -> Array c
 zipWith f arr brr = ZipWith f arr brr
 
+zipWith6 :: (Elt a, Elt b, Elt c, Elt d, Elt e, Elt f, Elt g)
+         => (Term a -> Term b -> Term c -> Term d -> Term e -> Term f -> Term g)
+         -> Array a -> Array b -> Array c -> Array d -> Array e -> Array f -> Array g
+zipWith6 = ZipWith6
+
 zip :: (Elt a, Elt b) => Array a -> Array b -> Array (a,b)
 zip arr brr = Zip arr brr
 

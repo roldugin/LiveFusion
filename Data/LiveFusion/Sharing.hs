@@ -54,6 +54,16 @@ data ASG e s where
             -> ArrayASG b s
             -> ArrayASG c s
 
+  ZipWith6G :: (Elt a, Elt b, Elt c, Elt d, Elt e, Elt f, Elt g)
+            => (Term a -> Term b -> Term c -> Term d -> Term e -> Term f -> Term g)
+            -> ArrayASG a s
+            -> ArrayASG b s
+            -> ArrayASG c s
+            -> ArrayASG d s
+            -> ArrayASG e s
+            -> ArrayASG f s
+            -> ArrayASG g s
+
   ZipG      :: (Elt a, Elt b)
             => ArrayASG a s
             -> ArrayASG b s
@@ -147,6 +157,15 @@ instance Typeable e => MuRef (AST e) where
         = ZipWithG f
           <$> (VarG <$> ap arr)
           <*> (VarG <$> ap brr)
+
+      mapDeRef' ap (ZipWith6 f arr brr crr drr err frr)
+        = ZipWith6G f
+          <$> (VarG <$> ap arr)
+          <*> (VarG <$> ap brr)
+          <*> (VarG <$> ap crr)
+          <*> (VarG <$> ap drr)
+          <*> (VarG <$> ap err)
+          <*> (VarG <$> ap frr)
 
       mapDeRef' ap (Zip arr brr)
         = ZipG
