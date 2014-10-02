@@ -55,6 +55,12 @@ data AST e where
            -> Term a
            -> ArrayAST a
 
+  Bpermute 
+           :: Elt a 
+           => ArrayAST a
+           -> ArrayAST Int
+           -> ArrayAST a
+
   Fold_s   :: Elt a
            => (Term a -> Term a -> Term a)
            -> ScalarAST a

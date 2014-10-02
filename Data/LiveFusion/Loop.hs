@@ -322,10 +322,9 @@ data Loop = Loop { -- | Loop entry block
                  , loopRates        :: IntDisjointSet
 
 
-                   -- | Guard tests and increments that need to be inserted
-                 , loopInsertIncrs  :: [Unique]  -- These are for the postprocessing step
-                 , loopInsertTests  :: [Unique]  -- and should probably be dealt with more elegantly.
-                 , loopNoInsertTests :: [Unique]
+                   -- | Guard tests and index initialisation/increments that need *not* be inserted
+                 , loopSkipTests    :: [Unique]  -- These are for the postprocessing step
+                 , loopSkipIncrs    :: [Unique]  -- and should probably be dealt with more elegantly.
 
 
                    -- | Loop's basic blocks with their associated labels
@@ -436,16 +435,12 @@ setFinalGoto from to = updateBlock from
 -- * Some loop field helper functions
 
 
-addToInsertIncrs :: Unique -> Loop -> Loop
-addToInsertIncrs uq loop = loop { loopInsertIncrs = uq : loopInsertIncrs loop }
+addToSkipIncrs :: Unique -> Loop -> Loop
+addToSkipIncrs uq loop = loop { loopSkipIncrs = uq : loopSkipIncrs loop }
 
 
-addToInsertTests :: Unique -> Loop -> Loop
-addToInsertTests uq loop = loop { loopInsertTests = uq : loopInsertTests loop }
-
-
-removeFromInsertTests :: Unique -> Loop -> Loop
-removeFromInsertTests uq loop = loop { loopNoInsertTests = uq : loopNoInsertTests loop }
+addToSkipTests :: Unique -> Loop -> Loop
+addToSkipTests uq loop = loop { loopSkipTests = uq : loopSkipTests loop }
 
 
 setTheRate :: Unique -> Loop -> Loop
@@ -547,10 +542,9 @@ pprLoop loop
       "Scalar Result: "  ++  maybe "None" pprVar              (loopScalarResult loop) ++\
       "The rate:      "  ++  maybe "None" pprId               (loopTheRate loop)      ++\
       "Rates:         "  ++  pprDisjointSet (loopRates loop)                          ++\
-      "To insert:" ++\
-      "  Inits/Incrs: "  ++  show (loopInsertIncrs loop)                              ++\
-      "  Tests:       "  ++  show (loopInsertTests loop)                              ++\
-      "  Except:      "  ++  show (loopNoInsertTests loop)                            ++\
+      "Skip inserting:" ++\
+      "  Inits/Incrs: "  ++  show (loopSkipIncrs loop)                                ++\
+      "  Tests:       "  ++  show (loopSkipTests loop)                                ++\
       "BlockMap:      "  ++\ pprBlockMap (loopBlockMap loop)
 
 
@@ -659,9 +653,9 @@ postprocessLoop loop = rewriteLoopLabelsAndRates
 insertTests :: Loop -> Loop
 insertTests loop = foldl insertTest loop toInsert
  where
-  toInsert = yes \\ no
-  yes = Rates.residual (loopInsertTests loop) (loopRates loop)
-  no  = Rates.residual (loopNoInsertTests loop) (loopRates loop)
+  toInsert = allRates \\ toSkip
+  toSkip   = Rates.residual (loopSkipTests loop) (loopRates loop)
+  allRates = representatives (loopRates loop)
 
   insertTest loop uq' = addStmt indexTest guard_
                       $ loop
@@ -679,9 +673,11 @@ insertTests loop = foldl insertTest loop toInsert
 
 
 insertIncrs :: Loop -> Loop
-insertIncrs loop = foldl insertIncr loop rates
+insertIncrs loop = foldl insertIncr loop toInsert
  where
-  rates = Rates.residual (loopInsertIncrs loop) (loopRates loop)
+  toInsert = allRates \\ toSkip
+  toSkip   = Rates.residual (loopSkipIncrs loop) (loopRates loop)
+  allRates = representatives (loopRates loop)
 
   insertIncr loop uq' = addStmt indexInit init_
                       $ addStmt indexIncr bottom_
@@ -769,18 +765,17 @@ removeClashingStmts loop = loop { loopBlockMap = AMap.map perblock (loopBlockMap
 
 {- loopEntry, loopArgs, loopArrResult, loopScalarResult, loopTheRate, loopRates, loopInsertIncrs, loopInsertTests, loopBlockMap -}
 instance Monoid Loop where
-  mempty = Loop Nothing Map.empty Nothing Nothing Nothing Rates.empty [] [] [] AMap.empty
+  mempty = Loop Nothing Map.empty Nothing Nothing Nothing Rates.empty [] [] AMap.empty
   mappend loop1 loop2
-    = Loop { loopEntry        = loopEntry    `joinWith` (<|>)
-           , loopArgs         = loopArgs     `joinWith` Map.union
+    = Loop { loopEntry        = loopEntry     `joinWith` (<|>)
+           , loopArgs         = loopArgs      `joinWith` Map.union
            , loopArrResult    = Nothing
            , loopScalarResult = Nothing
-           , loopTheRate      = loopTheRate  `joinWith` (<|>)
-           , loopRates        = loopRates    `joinWith` Rates.merge
-           , loopInsertIncrs  = loopInsertTests   `joinWith` (++)
-           , loopInsertTests  = loopInsertIncrs   `joinWith` (++)
-           , loopNoInsertTests= loopNoInsertTests `joinWith` (++)
-           , loopBlockMap     = loopBlockMap `joinWith` AMap.unionWith appendLoopBlockMap
+           , loopTheRate      = loopTheRate   `joinWith` (<|>)
+           , loopRates        = loopRates     `joinWith` Rates.merge
+           , loopSkipIncrs    = loopSkipIncrs `joinWith` (++)
+           , loopSkipTests    = loopSkipTests `joinWith` (++)
+           , loopBlockMap     = loopBlockMap  `joinWith` AMap.unionWith appendLoopBlockMap
            }
     where
       joinWith :: (Loop  -> field)          -- field to take from loop

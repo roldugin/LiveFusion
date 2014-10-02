@@ -49,7 +49,12 @@ fuse env node uq = fuse' node uq
     z'       = getScalar z uq
 
   fuse' (ReplicateG n x) uq = replicateG uq n x
-  
+
+  fuse' (BpermuteG arr ixs) uq = bpermuteG uq arr_loop ixs_loop
+   where
+    arr_loop = fuse' arr uq
+    ixs_loop = fuse' ixs uq
+
   -- See comment [1] at the bottom of the file
   fuse' (Fold_sG f z segd dat) uq = fold_sG uq f z' segd_loop data_loop
    where
@@ -107,7 +112,8 @@ manifestG uq vec = loop
   body_      = bodyLbl uq
 
   -- THE loop
-  loop       = addArg   arrVar (toDyn vec)
+  loop       = setArrResultOnly uq
+  	         $ addArg   arrVar (toDyn vec)
              $ addStmts init_stmts init_
              $ addStmts body_stmts body_
              $ producerLoop uq
@@ -380,7 +386,7 @@ replicate_sG uq len segd_loop elts_loop = loop
   body_result = bodyLbl result_uq
 
   -- THE loop
-  loop      = setArrResult uq
+  loop      = setArrResultOnly uq
             $ addStmts init_result_stmts init_result
             $ addStmts body_result_stmts body_result
             $ nested_loops
@@ -423,7 +429,7 @@ indices_sG uq len segd_loop = loop
   body_segd     = bodyLbl segd_uq
 
   -- THE loop
-  loop      = setArrResult uq
+  loop      = setArrResultOnly uq
             $ addStmts init_result_stmts init_result
             $ addStmts bottom_result_stmts bottom_result
             $ addStmts body_segd_stmts body_segd
@@ -455,18 +461,51 @@ replicateG uq n x = loop
   body_ = bodyLbl uq
 
   -- THE loop
-  loop      = setArrResult uq
+  loop      = setArrResultOnly uq
             $ addStmts init_stmts init_
             $ addStmts body_stmts body_
             $ producerLoop uq
+
+bpermuteG uq arr_loop ixs_loop = loop
+ where
+  arr_uq     = getJustRate arr_loop
+  ixs_uq     = getJustRate ixs_loop
+
+  aVar       = eltVar arr_uq   -- element from data array
+  aixVar     = indexVar arr_uq -- index at which data array is read
+  ixVar      = eltVar ixs_uq   -- element from index array
+  bVar       = eltVar uq       -- resulting element
+
+  -- body (sets up the index to read from)
+  ixBind     = bindStmt aixVar (varE ixVar)
+  bBind      = bindStmt bVar   (varE aVar)   
+  body_stmts = [ixBind,bBind]
+
+  -- labels
+  body_      = bodyLbl uq
+
+  -- THE loop
+  loop       = setArrResultOnly uq
+  	         $ addStmts body_stmts body_
+             $ setTheRate uq
+             -- Arr has random access rate. No rate really.
+             $ addToSkipIncrs arr_uq
+             $ addToSkipTests arr_uq
+             $ reuseRate uq ixs_uq
+             $ rebindLengthVar uq ixs_uq
+             -- Technically arr_loop is not a loop,
+             -- safely merge it in.
+             $ Loop.append ixs_loop
+             $ addDefaultSynonymLabels ixs_uq uq
+             $ addDefaultSynonymLabels uq arr_uq
+             $ arr_loop
 
 
 -- | Create a loop to be used by a produces.
 --
 -- Used by manifest, replicate, enum, etc..
 producerLoop :: Unique -> Loop
-producerLoop uq = addToInsertTests uq
-                $ addToInsertIncrs uq
+producerLoop uq = id
                 $ defaultLoop uq
 
 
@@ -492,7 +531,7 @@ mergeLoops new_uq loops
 
 -- | Adds predefined control flow for nested loops.
 --
--- The function takes loop/id of segd, loop/id of data,
+-- The function takes segd_loop, data_loop,
 -- id of rate (usually either segd_uq or data_uq) and id of result loop.
 --
 -- See comment [1] at the bottom of the file
@@ -536,7 +575,7 @@ nestLoops segd_loop data_loop rate_uq new_uq = loop
        $ setFinalGoto body_segd guard_data
        -- Replace statements in guard of data (assuming segd is correct)
        $ replaceStmts guard_data_stmts guard_data
-       $ removeFromInsertTests data_uq
+       $ addToSkipTests data_uq
        $ loop'
 
   -- Unite the new loop with whatever loop provides the correct rate.

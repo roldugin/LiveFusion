@@ -77,6 +77,12 @@ data ASG e s where
             -> Term a
             -> ArrayASG a s
 
+  BpermuteG
+           :: Elt a
+           => ArrayASG a s
+           -> ArrayASG Int s
+           -> ArrayASG a s
+
   ManifestG :: Elt a
             => V.Vector a
             -> ArrayASG a s
@@ -159,6 +165,11 @@ instance Typeable e => MuRef (AST e) where
 
       mapDeRef' ap (Replicate n x)
         = pure $ ReplicateG n x
+
+      mapDeRef' ap (Bpermute arr ixs)
+        = BpermuteG
+          <$> (VarG <$> ap arr)
+          <*> (VarG <$> ap ixs)
 
       mapDeRef' ap (Fold_s f z lens arr)
         = Fold_sG f

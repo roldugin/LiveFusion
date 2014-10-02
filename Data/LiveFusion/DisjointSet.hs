@@ -3,6 +3,7 @@ module Data.LiveFusion.DisjointSet
 	, merge
 	, unionInsert
 	, representative
+	, representatives
 	, residual
 	, subsets
 	, pprDisjointSet ) where
@@ -25,6 +26,13 @@ unionInsert :: Int -> Int -> IntDisjointSet -> IntDisjointSet
 unionInsert n1 n2 = union n1 n2
                   . insert n1
                   . insert n2
+
+
+-- | A list of all representatives of the set
+representatives :: IntDisjointSet -> [Int]
+representatives = nub            -- [3,1]
+                . map snd        -- [   3 ,   3 ,   1 ,   3 ]
+                . fst . toList   -- [(4,3),(3,3),(1,1),(2,3)]
 
 
 -- | Unsafe, non-balancing lookup

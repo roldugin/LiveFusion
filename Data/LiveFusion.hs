@@ -36,6 +36,18 @@ scan f z arr = Scan f (Scalar z) arr
 replicate :: Elt a => Term Int -> Term a -> Array a
 replicate n x = Replicate n x
 
+
+-- | O(length result). Backwards permutation of array elements.
+--
+--   @bpermute [50, 60, 20, 30] [0, 3, 2] = [50, 30, 20]@
+bpermute 
+        :: Elt a 
+        => Array a      -- ^ Source array.
+        -> Array Int    -- ^ Indices in the source to copy elements from.
+        -> Array a
+bpermute arr ixs = Bpermute arr ixs
+
+
 scan_s :: Elt a => (Term a -> Term a -> Term a) -> Term a -> Array Int -> Array a -> Array a
 scan_s f z segd arr = Scan_s f (Scalar z) segd arr
 
