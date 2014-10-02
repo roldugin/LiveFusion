@@ -45,7 +45,7 @@ emptyEnv = Env [] [] [] []
 
 declare :: Var -> Env -> Env
 declare v env
-  | (v `elem` envAssumptions env) || (v `elem` envDeclarations env) -- already declared
+  | (v `elem` envDeclarations env) -- already declared
   = error (err_DECLARED ++ pprVar v)
 
   | otherwise
@@ -54,9 +54,6 @@ declare v env
 
 markEnvDirty :: Var -> Env -> Env
 markEnvDirty v env
-  | (v `notElem` envAssumptions env) && (v `notElem` envDeclarations env)
-  = error (err_NOTDECLARED ++ pprVar v)
-
   | (v `elem` envDirty env)
   = error (err_ASSIGNED ++ pprVar v)
 
@@ -66,10 +63,6 @@ markEnvDirty v env
 
 assume :: Var -> Env -> Env
 assume v env
-  | (v `elem` envDeclarations env) || (v `elem` envAssumptions env) -- already assumed (or declared)
-  = env
-
-  | otherwise
   = env { envAssumptions = v : envAssumptions env }
 
 
@@ -101,8 +94,11 @@ varsE (LitE _)   = [] -- Literals are constant terms
 --
 -- Call to declare should come last to be more sure nothings is declared more than once.
 blockEnv :: Block -> Env
-blockEnv blk = foldl (flip analyse) emptyEnv (blockStmts blk)
+blockEnv blk = postproc
+             $ foldl (flip analyse) emptyEnv (blockStmts blk)
   where
+    postproc env = env { envAssumptions = envAssumptions env \\ envDeclarations env }
+
     analyse :: Stmt -> Env -> Env
     analyse (Bind v e)     = assumeAllIn e >>> declare v
     analyse (Assign v e)   = assumeAllIn e >>> markEnvDirty v
