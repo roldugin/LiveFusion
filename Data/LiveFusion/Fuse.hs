@@ -651,3 +651,39 @@ nestLoops segd_loop data_loop rate_uq new_uq = loop
 rebindLengthVar :: Unique -> Unique -> Loop -> Loop
 rebindLengthVar curr prev = addStmt stmt (initLbl curr)
   where stmt = bindStmt (lengthVar curr) (VarE $ lengthVar prev)
+
+
+{- [1]
+fold_s and other reductions run at the rate of the segment descriptor.
+This means they result in one element per segment.
+Thus the yielding loop is the outer one.
+So we could do
+@
+body_segd:
+  elt_segd = ...
+  goto guard_data
+guard_data:
+  unless ... goto yield_segd
+@
+
+The problem is that there may be more combinators consuming the output of fold_s, e.g.:
+
+@ map f $ fold_s f z segd arr @
+
+The `map` will insert its body statements into the `body_segd`
+where the result of folding a segment is not yet available.
+
+One possible solution is to have a new `body_segd'` block
+which will be entered after each segment is complete:
+@
+body_segd:
+  elt_segd = ...
+  goto guard_data
+guard_data:
+  unless ix < segend | goto body_segd'
+body_segd':
+  ...
+@
+This could actually be the general solution for all combinators
+but we will only apply it to segmented combinators with segd output rates for now.
+-}  

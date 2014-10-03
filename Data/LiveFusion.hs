@@ -74,14 +74,14 @@ indices_s len segd = Indices_s len segd
 -- Otherwise the array will be recomputed for every lookup.
 (!) :: Elt a => Array a -> Int -> a
 arr ! ix
-  = let vec = eval arr
+  = let vec = evalArrayAST arr
     in vec V.! ix
 
 force :: Elt a => Array a -> Array a
-force = Manifest . eval
+force = Manifest . evalArrayAST
 
 toList :: Elt a => Array a -> [a]
-toList = V.toList . eval
+toList = V.toList . evalArrayAST
 
 fromList :: Elt a => [a] -> Array a
 fromList = Manifest . V.fromList
@@ -89,7 +89,7 @@ fromList = Manifest . V.fromList
 -- | An instance for OverloadLists.
 --
 -- It makes it possible to use regular list syntax to construct arrays:
--- @ map (+1) [1,2,3] @
+-- @map (+1) [1,2,3]@
 --
 -- NOTE: Must enable OverloadedLists extension by using the following pragma:
 -- @{-# LANGUAGE OverloadedLists #-}@
