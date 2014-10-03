@@ -19,13 +19,22 @@ Library
     Data.LiveFusion.Combinators
     Data.LiveFusion.Types
 
-    -- Loop language
+    -- AST Processing
+    Data.LiveFusion.Sharing
     Data.LiveFusion.Fuse
+    Data.LiveFusion.Liveness
+
+    -- Loop language
     Data.LiveFusion.Loop
     Data.LiveFusion.LoopFunctions
-    Data.LiveFusion.Liveness
-    Data.LiveFusion.Sharing
-
+    Data.LiveFusion.Loop.Common
+    Data.LiveFusion.Loop.BlockMap
+    Data.LiveFusion.Loop.Block
+    Data.LiveFusion.Loop.Stmt
+    Data.LiveFusion.Loop.Expr
+    Data.LiveFusion.Loop.Label
+    Data.LiveFusion.Loop.Var
+    
     -- Scalar language
     Data.LiveFusion.Scalar.Convert
     Data.LiveFusion.Scalar.DeBruijn

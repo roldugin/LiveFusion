@@ -1,6 +1,8 @@
 module Data.LiveFusion.Liveness where
 
 import Data.LiveFusion.Loop
+import Data.LiveFusion.Loop.Var
+import Data.LiveFusion.Loop.Expr
 import Data.LiveFusion.Util
 
 import Data.Map ( Map )
