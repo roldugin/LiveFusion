@@ -5,7 +5,7 @@ module Data.LiveFusion
   ) where
 
 import Data.LiveFusion.AST
-import Data.LiveFusion.Combinators
+import Data.LiveFusion.Evaluator
 import Data.LiveFusion.Types
 import Data.LiveFusion.Scalar.HOAS
 

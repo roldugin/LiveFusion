@@ -1,5 +1,5 @@
 {-# LANGUAGE GADTs, RankNTypes, DeriveDataTypeable, ScopedTypeVariables, ExplicitForAll #-}
-module Data.LiveFusion.Combinators where
+module Data.LiveFusion.Evaluator where
 
 import Data.LiveFusion.AST
 import Data.LiveFusion.Loop as Loop
@@ -11,7 +11,6 @@ import Data.LiveFusion.Sharing
 
 -- TODO We should not hardcode HsBackend here
 import Data.LiveFusion.HsBackend
-
 
 import qualified Data.Vector.Unboxed as V
 import Prelude hiding ( map, zip, filter, zipWith )

@@ -16,7 +16,7 @@ Library
 
     -- Frontend
     Data.LiveFusion.AST
-    Data.LiveFusion.Combinators
+    Data.LiveFusion.Evaluator
     Data.LiveFusion.Types
 
     -- AST Processing
@@ -52,7 +52,6 @@ Library
     Data.LiveFusion.HsBackend.Prelude
     Data.LiveFusion.HsBackend.THDefinitions
     Data.LiveFusion.HsBackend.Types    
-
 
     -- Helper modules
     Data.LiveFusion.AliasMap
