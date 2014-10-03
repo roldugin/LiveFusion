@@ -2,6 +2,7 @@
 module Data.LiveFusion
   ( module Data.LiveFusion
   , module Data.LiveFusion.HsBackend.Prelude
+  , module Data.LiveFusion.Evaluator
   ) where
 
 import Data.LiveFusion.AST
@@ -55,6 +56,8 @@ bpermute
         -> Array a
 bpermute arr ixs = Bpermute arr ixs
 
+packByBoolTag :: Elt a => Term Bool -> Array Bool -> Array a -> Array a
+packByBoolTag tag tags xs = PackByBoolTag tag tags xs
 
 scan_s :: Elt a => (Term a -> Term a -> Term a) -> Term a -> Array Int -> Array a -> Array a
 scan_s f z segd arr = Scan_s f (Scalar z) segd arr

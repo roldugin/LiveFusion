@@ -101,6 +101,13 @@ data ASG e s where
             => Term a
             -> ScalarASG a s
 
+  PackByBoolTagG
+           :: Elt a 
+           => Term Bool
+           -> ArrayASG Bool s
+           -> ArrayASG a s
+           -> ArrayASG a s
+
   Fold_sG   :: Elt a
             => (Term a -> Term a -> Term a)
             -> ScalarASG a s
@@ -189,6 +196,11 @@ instance Typeable e => MuRef (AST e) where
         = BpermuteG
           <$> (VarG <$> ap arr)
           <*> (VarG <$> ap ixs)
+
+      mapDeRef' ap (PackByBoolTag tag tags arr)
+        = PackByBoolTagG tag
+          <$> (VarG <$> ap tags)
+          <*> (VarG <$> ap arr)
 
       mapDeRef' ap (Fold_s f z lens arr)
         = Fold_sG f

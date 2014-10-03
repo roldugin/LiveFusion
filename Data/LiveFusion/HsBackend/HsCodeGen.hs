@@ -377,6 +377,7 @@ preamble moduleName =
   "import GHC.Num                                                          " ++\
   "import GHC.Real                                                         " ++\  
   "import GHC.Classes                                                      " ++\
+  "import GHC.Types                                                        " ++\
   "import Control.Monad.ST                                                 " ++\
   "import Control.Monad.Primitive                                          " ++\
   "import Data.Tuple                                                       " ++\

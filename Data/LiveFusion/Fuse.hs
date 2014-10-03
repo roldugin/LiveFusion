@@ -65,6 +65,11 @@ fuse env node uq = fuse' node uq
     arr_loop = fuse' arr uq
     ixs_loop = fuse' ixs uq
 
+  fuse' (PackByBoolTagG tag tags arr) uq = packByBoolTagG uq tag tags_loop arr_loop
+   where
+    tags_loop = fuse' tags uq
+    arr_loop  = fuse' arr uq
+
   -- See comment [1] at the bottom of the file
   fuse' (Fold_sG f z segd dat) uq = fold_sG uq f z' segd_loop data_loop
    where
@@ -243,6 +248,8 @@ filterG uq p arr_loop = loop
              $ rebindLengthVar uq arr_uq
              $ addDefaultSynonymLabels uq arr_uq
              $ setTheRate uq
+             $ addToSkipTests uq
+             $ addToSkipIncrs uq
              $ arr_loop
 
 
@@ -285,6 +292,52 @@ scanG uq f z arr_loop = loop
              $ addDefaultSynonymLabels  uq arr_uq
              $ setTheRate uq
              $ arr_loop
+
+
+-- | A combination of zipWith and filter.
+packByBoolTagG uq tag tags_loop arr_loop = loop
+ where
+  arr_uq     = getJustRate arr_loop
+  tags_uq    = getJustRate tags_loop
+  tagVar     = eltVar tags_uq
+  aVar       = eltVar arr_uq
+  bVar       = eltVar uq
+  ixVar      = indexVar uq   -- writing index
+
+  -- init
+  ixInit     = bindStmt ixVar (LitE (0::Int))  -- index initialization
+  init_stmts = [ixInit]
+
+  -- body
+  predExp    = fun1 (==. tag) tagVar
+  guard      = guardStmt predExp bottom_
+  bBind      = bindStmt bVar (VarE aVar)
+  body_stmts = [guard, bBind]
+
+  -- yield
+  ixUpdate   = incStmt ixVar
+  yield_stmts = [ixUpdate]
+
+  -- labels
+  init_      = initLbl uq
+  body_      = bodyLbl uq
+  yield_     = yieldLbl uq
+  bottom_    = bottomLbl uq
+
+  -- THE loop
+  loop       = setArrResultOnly uq
+             $ addStmts init_stmts  init_
+             $ addStmts body_stmts  body_
+             $ addStmts yield_stmts yield_
+             -- Note that we aren't reusing the rate since read/write indexes are not synchronised
+             $ freshRate       uq
+             $ rebindLengthVar uq arr_uq
+             $ addDefaultSynonymLabels uq arr_uq
+             $ setTheRate uq
+             $ addToSkipTests uq
+             $ addToSkipIncrs uq
+             -- Do not merge with the new rate, because we are filtering
+             $ mergeLoops arr_uq [arr_loop, tags_loop]
 
 
 fold_sG uq f z segd_loop data_loop = loop

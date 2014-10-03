@@ -1,3 +1,4 @@
+{-# LANGUAGE TemplateHaskell #-}
 module Data.LiveFusion.HsBackend.Prelude where
 
 import Data.LiveFusion.Scalar.HOAS
@@ -116,12 +117,29 @@ minTerm, maxTerm :: IsOrd a => Term a -> Term a -> Term a
 minTerm x y = (code minImpl) `app` x `app` y
 maxTerm x y = (code maxImpl) `app` x `app` y
 
+
+-------------------------------------------------------------------------------
+-- * Booleans
+
+true :: Term Bool
+true = liftT0 $ mkImpl True [| True |]
+
+false :: Term Bool
+false = liftT0 $ mkImpl False [| False |]
+
+
+-------------------------------------------------------------------------------
 -- * Lifting other Haskell functions (use mkImpl)
 
-liftT :: (Elt a, Elt b)
+liftT0 :: (Elt a)
+      => Impl a
+      -> Term a
+liftT0 impl = code impl
+
+liftT1 :: (Elt a, Elt b)
       => Impl (a -> b)
       -> Term a -> Term b
-liftT impl x = (code impl) `app` x
+liftT1 impl x = (code impl) `app` x
 
 liftT2 :: (Elt a, Elt b, Elt c)
        => Impl (a -> b -> c)

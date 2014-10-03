@@ -71,6 +71,13 @@ data AST e where
            -> ArrayAST Int
            -> ArrayAST a
 
+  PackByBoolTag
+           :: Elt a 
+           => Term Bool
+           -> ArrayAST Bool
+           -> ArrayAST a
+           -> ArrayAST a
+
   Fold_s   :: Elt a
            => (Term a -> Term a -> Term a)
            -> ScalarAST a
