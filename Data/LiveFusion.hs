@@ -1,5 +1,8 @@
 {-# LANGUAGE TypeFamilies, TypeSynonymInstances, FlexibleInstances #-}
-module Data.LiveFusion where
+module Data.LiveFusion
+  ( module Data.LiveFusion
+  , module Data.LiveFusion.HsBackend.Prelude
+  ) where
 
 import Data.LiveFusion.AST
 import Data.LiveFusion.Combinators
