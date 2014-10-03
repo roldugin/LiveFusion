@@ -3,17 +3,15 @@ module Data.LiveFusion.Combinators where
 
 import Data.LiveFusion.AST
 import Data.LiveFusion.Loop as Loop
-import Data.LiveFusion.LoopFunctions as Loop
 import Data.LiveFusion.Util
-import Data.LiveFusion.HsEvaluator
 import Data.LiveFusion.Types hiding ( Unique )
 import Data.LiveFusion.Scalar.HOAS as HOAS
 import Data.LiveFusion.Fuse
 import Data.LiveFusion.Sharing
 
--- For testing
-import Data.LiveFusion.HsBackend.Prelude
-import Data.LiveFusion.HsCodeGen
+-- TODO We should not hardcode HsBackend here
+import Data.LiveFusion.HsBackend
+
 
 import qualified Data.Vector.Unboxed as V
 import Prelude hiding ( map, zip, filter, zipWith )

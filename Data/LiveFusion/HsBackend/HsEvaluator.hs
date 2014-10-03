@@ -1,4 +1,7 @@
-module Data.LiveFusion.HsEvaluator where
+module Data.LiveFusion.HsBackend.HsEvaluator where
+
+import Data.LiveFusion.Loop
+import Data.LiveFusion.HsBackend.HsCodeGen
 
 import qualified Data.Vector.Unboxed as V
 import Prelude hiding ( map, zip, filter, zipWith )
@@ -7,7 +10,7 @@ import Unsafe.Coerce
 import GHC.Prim (Any)
 import qualified Data.List as P
 import Data.Typeable
-import GHC hiding ( Unique, pprExpr ) -- TODO instead import what's needed
+import GHC hiding ( Unique, pprExpr )
 import GHC.Paths -- ( libdir )
 import DynFlags -- ( defaultFatalMessager, defaultFlushOut )
 import Control.Exception
@@ -21,9 +24,6 @@ import Data.Reify.Graph
 import Data.Dynamic
 import Data.Map as Map ( elems )
 import Data.Functor
-
-import Data.LiveFusion.Loop
-import Data.LiveFusion.HsCodeGen
 
 
 -- | Set this to enable/disable dumping GHC core of compiled plugins

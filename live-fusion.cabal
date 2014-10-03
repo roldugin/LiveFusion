@@ -34,7 +34,7 @@ Library
     Data.LiveFusion.Loop.Expr
     Data.LiveFusion.Loop.Label
     Data.LiveFusion.Loop.Var
-    
+
     -- Scalar language
     Data.LiveFusion.Scalar.Convert
     Data.LiveFusion.Scalar.DeBruijn
@@ -46,12 +46,13 @@ Library
 
     -- Haskell backend
     Data.LiveFusion.HsBackend
+    Data.LiveFusion.HsBackend.HsCodeGen
+    Data.LiveFusion.HsBackend.HsEvaluator
     Data.LiveFusion.HsBackend.Impl
     Data.LiveFusion.HsBackend.Prelude
     Data.LiveFusion.HsBackend.THDefinitions
-    Data.LiveFusion.HsBackend.Types
-    Data.LiveFusion.HsCodeGen
-    Data.LiveFusion.HsEvaluator
+    Data.LiveFusion.HsBackend.Types    
+
 
     -- Helper modules
     Data.LiveFusion.AliasMap

@@ -1,8 +1,5 @@
 {-# LANGUAGE TemplateHaskell, GADTs #-}
-
--- Source Haskell code generator.
-
-module Data.LiveFusion.HsCodeGen where
+module Data.LiveFusion.HsBackend.HsCodeGen where
 
 import Data.LiveFusion.HsBackend.Impl
 import Data.LiveFusion.HsBackend.Types
@@ -36,7 +33,7 @@ import Control.Monad.Primitive
 import Data.Dynamic
 
 
--- | Generate a TH function represeting a code block of a loop.
+-- | Generate a TH function representing a code block of a loop.
 --
 --   TODO: Perhaps passing the whole environment is not the best approach.
 --   TODO: KNOWN ISSUE Updated variable cannot be used in the same block.
@@ -50,13 +47,12 @@ cgBlock emap lbl blk = blockFun
 
     cgStmts (stmt:rest)
       = case stmt of
-          (Guard p lbl) -> return {- a sinleton list -}
+          (Guard p lbl) -> return {- a singleton list -}
                         $ cgGuardStmt emap dirtyVars   -- environment stuff
                                       p    lbl         -- guard parameters
                                       (cgStmts rest)   -- statements following the guard
           _             -> (cgStmt emap dirtyVars stmt) : (cgStmts rest)
     cgStmts [] = []
-
 
     blockArgs = assumedVarsOfBlock lbl emap
 
@@ -182,7 +178,7 @@ applyMany :: TH.Exp -> [TH.Exp] -> TH.Exp
 applyMany fun exps = applyMany1 (fun : exps)
 
 
--- | Turn a Loop Language Expession to a TH Expression.
+-- | Turn a Loop Language Expression to a TH Expression.
 --
 cgExp :: Lp.Expr -> TH.Exp
 cgExp (Lp.VarE v)
@@ -357,7 +353,7 @@ loopDecs loop = map codeGenBlock allBlocks
 
     allBlocks = map (first theOneLabel) (AMap.assocs $ loopBlockMap loop)
 
-    extEnv    = extendedEnv loop -- Environment after variable and goto analyses
+    extEnv    = extendedEnv loop -- Environment after variable and goto analysis
 
 
 loopCode :: Loop -> String
@@ -365,7 +361,7 @@ loopCode = pprint . loopDecs
 
 
 --------------------------------------------------------------------------------
--- Code templates --------------------------------------------------------------
+-- * Code templates
 
 preamble :: String -> String
 preamble moduleName =
@@ -405,33 +401,3 @@ preamble moduleName =
   "sliceArray :: (V.Unbox a, PrimMonad m) => MV.MVector (PrimState m) a -> Int -> m (V.Vector a) " ++\
   "sliceArray vec len = V.unsafeFreeze $ MV.unsafeTake len vec             " ++\
   "                                                                        "
-
-
--- The following generates fresh names, so avoid TH for now...
-{-
-helperFunctions :: [Dec]
-helperFunctions = unsafePerformIO $ runQ [d|
-
-  fd :: Typeable a => Dynamic -> a
-  fd d = case fromDynamic d of
-           Just v  -> v
-           Nothing -> error "Argument type mismatch"
-
-  lengthArray :: Unbox a => V.Vector a -> Int
-  lengthArray = V.length
-
-  readArray :: V.Unbox a => Int -> V.Vector a -> a
-  readArray i arr = V.unsafeIndex arr i
-
-  writeArray :: V.Unbox a => MV.MVector s a -> Int -> a -> ST s ()
-  writeArray arr i x = MV.unsafeWrite arr i x
-
-  newArray :: V.Unbox a => Int -> ST s (MV.MVector s a)
-  newArray n = MV.new n
-
-  sliceArray :: (V.Unbox a, PrimMonad m) => MV.MVector (PrimState m) a -> Int -> m (V.Vector a)
-  sliceArray vec len = V.unsafeFreeze $ MV.unsafeTake len vec
-
-  |]
-{-# NOINLINE helperFunctions #-}
--}
