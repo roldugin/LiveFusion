@@ -5,6 +5,8 @@ import Data.LiveFusion.Loop.Expr
 import Data.LiveFusion.Loop.Label
 import Data.LiveFusion.Loop.Var
 
+import Data.LiveFusion.Scalar.HOAS as HOAS
+
 import Data.LiveFusion.AliasMap
 import Data.LiveFusion.DisjointSet as Rates
 import Data.LiveFusion.Util
@@ -199,6 +201,29 @@ rewriteStmtRates rates = mapVars rw
     rw v_ = v_
 
 
+-- | In the final loop we choose just one label out of all
+--   and use it everywhere where the same set of labels is used.
+--
+-- For example
+-- @
+-- body_3:
+-- body_2:
+--   elt_3 = f elt_2
+--   goto yield_3
+-- @
+-- gets rewritten to use the smallest label
+-- @
+-- body_3:
+-- body_2:
+--   elt_3 = f elt_2
+--   goto yield_2    <-- changed
+-- @
+rewriteStmtLabels :: [Set Label] -> Stmt -> Stmt
+rewriteStmtLabels lbls = mapLabels rw
+  where
+    rw l = theSynonymLabel lbls l
+
+
 -- | Two statement are considered to be clashing if they bind the same variable.
 clash :: Stmt -> Stmt -> Bool
 clash s1 s2 = fromMaybe False clash'
@@ -207,3 +232,14 @@ clash s1 s2 = fromMaybe False clash'
                v1 <- bindsMb s1
                v2 <- bindsMb s2
                return (v1 == v2)
+
+
+-------------------------------------------------------------------------------
+-- * Noise
+
+incStmt :: Var -> Stmt
+incStmt v = assignStmt v incExpr
+  where
+    incExpr  = plusIntE `AppE` vE `AppE` oneE
+    plusIntE = TermE (lam2 plusInt)
+    vE       = varE v

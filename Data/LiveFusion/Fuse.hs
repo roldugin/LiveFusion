@@ -3,7 +3,6 @@ module Data.LiveFusion.Fuse where
 
 import Data.LiveFusion.AST
 import Data.LiveFusion.Loop as Loop
-import Data.LiveFusion.LoopFunctions as Loop
 import Data.LiveFusion.Sharing
 import Data.LiveFusion.Scalar.HOAS as HOAS
 import Data.LiveFusion.HsBackend.Prelude

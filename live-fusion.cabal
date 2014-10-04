@@ -26,7 +26,8 @@ Library
 
     -- Loop language
     Data.LiveFusion.Loop
-    Data.LiveFusion.LoopFunctions
+    Data.LiveFusion.Loop.LoopType
+    Data.LiveFusion.Loop.Postprocess
     Data.LiveFusion.Loop.Common
     Data.LiveFusion.Loop.BlockMap
     Data.LiveFusion.Loop.Block

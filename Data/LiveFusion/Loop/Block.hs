@@ -5,8 +5,14 @@ import Data.LiveFusion.Loop.Stmt
 import Data.LiveFusion.Loop.Label
 import Data.LiveFusion.Loop.Var
 
+import Data.LiveFusion.DisjointSet
+
 import Data.Functor
 import Data.Maybe
+import Data.Set ( Set )
+import qualified Data.Set as Set
+
+import Control.Applicative ( (<|>) )
 
 
 data Block = Block [Stmt] (Maybe Stmt)
@@ -39,6 +45,11 @@ unsetBlockFinal :: Block -> Block
 unsetBlockFinal (Block stmts _) = Block stmts Nothing
 
 
+mergeBlocks :: Block -> Block -> Block
+mergeBlocks (Block stmts1 final1) (Block stmts2 final2)
+  = Block (stmts1 ++ stmts2) (final1 <|> final2)
+
+
 class BlockContainer c where
   mapBlocks :: (Block -> Block) -> c -> c
 
@@ -57,3 +68,14 @@ pprBlock :: Block -> String
 pprBlock (Block stmts mbfinal)
   = unlines $ map pprStmt (stmts ++ fin)
   where fin = maybe [] return mbfinal -- returns either singleton or empty list
+
+
+rewriteBlockLabelsAndRates :: [Set Label] -> IntDisjointSet -> Block -> Block
+rewriteBlockLabelsAndRates lbls rates (Block stmts final) = Block stmts' final'
+  where
+    stmts' = map (rewriteStmtRates rates)
+           $ map (rewriteStmtLabels lbls)
+           $ stmts
+    final' = rewriteStmtRates rates
+         <$> rewriteStmtLabels lbls
+         <$> final

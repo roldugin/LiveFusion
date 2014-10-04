@@ -1,8 +1,8 @@
 {-# LANGUAGE GADTs #-}
 module Data.LiveFusion.Loop.Expr where
 
-import Data.LiveFusion.Loop.Var
 import Data.LiveFusion.Loop.Common
+import Data.LiveFusion.Loop.Var
 
 import Data.LiveFusion.Scalar.HOAS as HOAS
 import qualified Data.LiveFusion.Scalar.DeBruijn as DeBruijn
@@ -11,6 +11,7 @@ import Data.LiveFusion.Types
 import Data.LiveFusion.Util
 
 import Data.LiveFusion.HsBackend.Types -- Bad!!
+import Data.LiveFusion.HsBackend.Prelude
 
 import Data.List as List
 import Data.Typeable
@@ -68,25 +69,6 @@ varE :: Var -> Expr
 varE = VarE
 
 
--- | Shorthand for applying a 1-argument function to a var.
-fun1 :: (Elt a, Elt b) => (Term a -> Term b) -> Var -> Expr
-fun1 f x = (TermE (lam f)) `AppE` (VarE x)
-
-
--- | Shorthand for applying a 2-argument function to a var.
-fun2 :: (Elt a, Elt b, Elt c) => (Term a -> Term b -> Term c) -> Var -> Var -> Expr
-fun2 f x y = (TermE (lam2 f)) `AppE` (VarE x) `AppE` (VarE y)
-
-
-fun6 :: (Elt a, Elt b, Elt c, Elt d, Elt e, Elt f, Elt g)
-     => (Term a -> Term b -> Term c -> Term d -> Term e -> Term f -> Term g)
-     -> Var -> Var -> Var -> Var -> Var -> Var -> Expr
-fun6 fun a b c d e f = foldl apply (TermE (lam6 fun)) [a,b,c,d,e,f]
-  where 
-    apply :: Expr -> Var -> Expr
-    apply e v = e `AppE` (VarE v)
-
-
 constE :: (THElt e, Elt e) => e -> Expr
 constE = LitE
 
@@ -101,3 +83,39 @@ pprExpr (TermE t)
   = paren $ DeBruijn.pprTerm $ DeBruijn.convert t
 pprExpr (LitE i)
   = show i
+
+
+-------------------------------------------------------------------------------
+-- * Dealing with Terms
+
+-- | Shorthand for applying a 1-argument function to a var.
+fun1 :: (Elt a, Elt b) => (Term a -> Term b) -> Var -> Expr
+fun1 f x = (TermE (lam f)) `AppE` (VarE x)
+
+
+-- | Shorthand for applying a 2-argument function to a var.
+fun2 :: (Elt a, Elt b, Elt c) => (Term a -> Term b -> Term c) -> Var -> Var -> Expr
+fun2 f x y = (TermE (lam2 f)) `AppE` (VarE x) `AppE` (VarE y)
+
+
+fun6 :: (Elt a, Elt b, Elt c, Elt d, Elt e, Elt f, Elt g)
+     => (Term a -> Term b -> Term c -> Term d -> Term e -> Term f -> Term g)
+     -> Var -> Var -> Var -> Var -> Var -> Var -> Expr
+fun6 fun a b c d e f = foldl apply (TermE (lam6 fun)) [a,b,c,d,e,f]
+  where
+    apply :: Expr -> Var -> Expr
+    apply e v = e `AppE` (VarE v)
+
+
+-- | This can go as soon as we make internal scalar language fully typed
+plusInt :: Term Int -> Term Int -> Term Int
+plusInt = plusTerm
+
+
+ltInt :: Term Int -> Term Int -> Term Bool
+ltInt = ltTerm
+
+
+zeroE, oneE :: Expr
+zeroE = TermE (0 :: Term Int)
+oneE  = TermE (1 :: Term Int)

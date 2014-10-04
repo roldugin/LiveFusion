@@ -32,13 +32,14 @@ pprLabel = show
 --------------------------------------------------------------------------------
 -- * Several predefined labels
 
-initNm, guardNm, bodyNm, yieldNm, bottomNm, doneNm :: Name
+initNm, guardNm, bodyNm, yieldNm, bottomNm, doneNm, nestNm :: Name
 initNm   = "init"
 guardNm  = "guard"
 bodyNm   = "body"
 yieldNm  = "yield"
 bottomNm = "bottom"
 doneNm   = "done"
+nestNm   = "nest"  -- Not part of default label names
 
 
 -- | A list of standard label constructors
@@ -46,13 +47,14 @@ stdLabelNames :: [Name]
 stdLabelNames = [initNm, guardNm, bodyNm, yieldNm, bottomNm, doneNm]
 
 
-initLbl, guardLbl, bodyLbl, yieldLbl, bottomLbl, doneLbl :: Id -> Label
+initLbl, guardLbl, bodyLbl, yieldLbl, bottomLbl, doneLbl, nestLbl :: Id -> Label
 initLbl   = Label initNm
 guardLbl  = Label guardNm
 bodyLbl   = Label bodyNm
 yieldLbl  = Label yieldNm
 bottomLbl = Label bottomNm
 doneLbl   = Label doneNm
+nestLbl   = Label nestNm
 
 
 mkLabels :: [Name] -> Id -> [Label]
