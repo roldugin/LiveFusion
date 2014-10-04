@@ -42,7 +42,7 @@ zipWith6 = ZipWith6
 
 
 zip :: (Elt a, Elt b) => Array a -> Array b -> Array (a,b)
-zip arr brr = Zip arr brr
+zip = zipWith (.*.)
 
 
 fsts :: (Elt a, Elt b) => Array (a,b) -> Array a

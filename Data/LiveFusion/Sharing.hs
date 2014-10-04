@@ -64,11 +64,6 @@ data ASG e s where
             -> ArrayASG f s
             -> ArrayASG g s
 
-  ZipG      :: (Elt a, Elt b)
-            => ArrayASG a s
-            -> ArrayASG b s
-            -> ArrayASG (a,b) s
-
   FoldG     :: Elt a
             => (Term a -> Term a -> Term a)
             -> ScalarASG a s
@@ -173,11 +168,6 @@ instance Typeable e => MuRef (AST e) where
           <*> (VarG <$> ap drr)
           <*> (VarG <$> ap err)
           <*> (VarG <$> ap frr)
-
-      mapDeRef' ap (Zip arr brr)
-        = ZipG
-          <$> (VarG <$> ap arr)
-          <*> (VarG <$> ap brr)
 
       mapDeRef' ap (Fold f z arr)
         = FoldG f

@@ -42,11 +42,6 @@ data AST e where
            -> ArrayAST f
            -> ArrayAST g
 
-  Zip      :: (Elt a, Elt b)
-           => ArrayAST a
-           -> ArrayAST b
-           -> ArrayAST (a,b)
-
   Fold     :: Elt a
            => (Term a -> Term a -> Term a)
            -> ScalarAST a
@@ -117,6 +112,5 @@ showAST :: AST e -> String
 showAST (Map _ arr) = "Map (" ++ (showAST arr) ++ ")"
 showAST (Filter _ arr) = "Filter (" ++ (showAST arr) ++ ")"
 showAST (ZipWith _ arr brr) = "ZipWith (" ++ (showAST arr) ++ ") (" ++ (showAST brr) ++ ")"
-showAST (Zip arr brr) = "Zip (" ++ (showAST arr) ++ ") (" ++ (showAST brr) ++ ")"
 showAST (Fold _ _ arr) = "Fold (" ++ (showAST arr) ++ ")"
 showAST (Manifest vec) = show vec
