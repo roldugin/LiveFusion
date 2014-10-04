@@ -1,6 +1,8 @@
 {-# LANGUAGE TypeFamilies, TypeSynonymInstances, FlexibleInstances #-}
 module Data.LiveFusion
   ( module Data.LiveFusion
+  , module Data.LiveFusion.Types
+  , module Data.LiveFusion.Scalar.HOAS
   , module Data.LiveFusion.HsBackend.Prelude
   , module Data.LiveFusion.Evaluator
   ) where
