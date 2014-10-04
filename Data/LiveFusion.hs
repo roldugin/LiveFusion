@@ -12,7 +12,7 @@ import Data.LiveFusion.Scalar.HOAS
 
 import Data.LiveFusion.HsBackend.Prelude
 
-import Prelude hiding ( map, filter, zipWith, zipWith3, zip, replicate )
+import Prelude hiding ( map, filter, zipWith, zipWith3, zip, replicate, fst, snd )
 
 import Data.Vector.Unboxed as V ( toList, fromList, (!) )
 import GHC.Exts
@@ -41,6 +41,14 @@ zipWith6 = ZipWith6
 
 zip :: (Elt a, Elt b) => Array a -> Array b -> Array (a,b)
 zip arr brr = Zip arr brr
+
+
+fsts :: (Elt a, Elt b) => Array (a,b) -> Array a
+fsts = map fst
+
+
+snds :: (Elt a, Elt b) => Array (a,b) -> Array b
+snds = map snd
 
 
 fold :: Elt a => (Term a -> Term a -> Term a) -> Term a -> Array a -> a

@@ -5,6 +5,8 @@ import Data.LiveFusion.Scalar.HOAS
 import Data.LiveFusion.HsBackend.Impl
 import Data.LiveFusion.Types
 
+import Language.Haskell.TH as TH
+
 import Data.Typeable
 
 
@@ -129,6 +131,32 @@ false = liftT0 $ mkImpl False [| False |]
 
 
 -------------------------------------------------------------------------------
+-- * Conditionals
+
+-- | To use sugar if-then-else syntax set -XRebindableSyntax.
+ifThenElse :: Elt a => Term Bool -> Term a -> Term a -> Term a
+ifThenElse = liftT3 $ mkImpl hsExp [| \p x y -> case p of { True -> x ; False -> y } |]
+    where hsExp p x y = case p of { True -> x; False -> y }
+
+
+-------------------------------------------------------------------------------
+-- * Tuples
+
+fst :: (Elt a, Elt b) => Term (a,b) -> Term a
+fst = liftT1 $ mkImpl Prelude.fst [| Prelude.fst |]
+
+snd :: (Elt a, Elt b) => Term (a,b) -> Term b
+snd = liftT1 $ mkImpl Prelude.snd [| Prelude.snd |]
+
+
+infix 8 .*.
+-- | Pair construction
+(.*.) :: (Elt a, Elt b) => Term a -> Term b -> Term (a,b)
+(.*.) = liftT2 $ mkImpl (,) tupConE
+  where tupConE = TH.conE $ TH.mkName "(,)"
+
+
+-------------------------------------------------------------------------------
 -- * Lifting other Haskell functions (use mkImpl)
 
 liftT0 :: (Elt a)
@@ -136,15 +164,18 @@ liftT0 :: (Elt a)
       -> Term a
 liftT0 impl = code impl
 
+
 liftT1 :: (Elt a, Elt b)
       => Impl (a -> b)
       -> Term a -> Term b
 liftT1 impl x = (code impl) `app` x
 
+
 liftT2 :: (Elt a, Elt b, Elt c)
        => Impl (a -> b -> c)
        -> Term a -> Term b -> Term c
 liftT2 impl x y = (code impl) `app` x `app` y
+
 
 liftT3 :: (Elt a, Elt b, Elt c, Elt d)
        => Impl (a -> b -> c -> d)
