@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies, TypeSynonymInstances, FlexibleInstances #-}
+{-# LANGUAGE TypeFamilies, TypeSynonymInstances, FlexibleInstances, RebindableSyntax #-}
 module Data.LiveFusion
   ( module Data.LiveFusion
   , module Data.LiveFusion.Types
@@ -82,6 +82,14 @@ packByBoolTag tag tags xs = PackByBoolTag tag tags xs
 
 scan_s :: Elt a => (Term a -> Term a -> Term a) -> Term a -> Array Int -> Array a -> Array a
 scan_s f z segd arr = Scan_s f (Scalar z) segd arr
+
+
+count_s :: Term Bool -> Array Int -> Array Bool -> Array Int
+count_s bool segd = fold_s (+) 0 segd
+                  . map tagToInt
+  where tagToInt tag = if tag ==. bool
+                          then 1
+                          else 0
 
 
 -- | At the moment fold_s cannot have any segmented combinators *after* it in the pipeline
