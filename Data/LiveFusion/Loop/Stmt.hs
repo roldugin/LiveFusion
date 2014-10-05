@@ -11,9 +11,10 @@ import Data.LiveFusion.AliasMap
 import Data.LiveFusion.DisjointSet as Rates
 import Data.LiveFusion.Util
 
-import Data.List
+import Data.List as List
 import Data.Maybe
-import Data.Set
+import Data.Set ( Set )
+import qualified Data.Set as Set
 
 
 data Stmt = Bind   Var Expr
@@ -204,7 +205,8 @@ extractWithDeps v = extract [v]
             moreDeps = concatMap references found
             -- find statements that bind those
             (moreFound, rest') = extract moreDeps rest
-        in  (found ++ moreFound, rest')
+        in  if null found then (found, rest)
+                          else (found ++ moreFound, rest')
 
     bindsAny vs stmt = case bindsMb stmt of
                          Just v  -> v `elem` vs

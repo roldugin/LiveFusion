@@ -22,6 +22,10 @@ emptyBlock :: Block
 emptyBlock = Block [] Nothing
 
 
+blockBodyStmts :: Block -> [Stmt]
+blockBodyStmts (Block stmts _) = stmts
+
+
 blockStmts :: Block -> [Stmt]
 blockStmts (Block stmts final) = stmts ++ maybeToList final
 
@@ -79,3 +83,9 @@ rewriteBlockLabelsAndRates lbls rates (Block stmts final) = Block stmts' final'
     final' = rewriteStmtRates rates
          <$> rewriteStmtLabels lbls
          <$> final
+
+
+-------------------------------------------------------------------------------
+-- * Transfering statements between blocks
+
+

@@ -126,15 +126,13 @@ maybeNestLoops :: Loop -> Loop
 maybeNestLoops loop@(getNesting -> Nothing) = loop
 maybeNestLoops loop@(getNesting -> Just (segd_uq, data_uq)) = loop'
  where
+  segelt     = eltVar segd_uq
+
   -- nest_segd (run before each segment, acts like init for inner loop)
-  segdVar    = arrayVar segd_uq
-  segnumVar  = indexVar segd_uq
-  seglenVar  = eltVar segd_uq
-  -- for now assume segd is a manifest array and read it explicitely
-  seglenRead = readArrStmt seglenVar segdVar (VarE segnumVar)
+  seglenVar  = lengthVar segd_uq
   segendVar  = var "end" segd_uq  -- end of segment index
-  segendSet  = bindStmt segendVar (fun2 plusInt ixVar seglenVar)
-  nest_segd_stmts = [seglenRead, segendSet]
+  segendSet  = bindStmt segendVar (fun2 plusInt ixVar segelt)
+  nest_segd_stmts = [segendSet]
 
   -- guard_data (have we reached the end of segment?)
   ixVar      = indexVar data_uq
@@ -156,6 +154,7 @@ maybeNestLoops loop@(getNesting -> Just (segd_uq, data_uq)) = loop'
              $ setFinalGoto nest_segd guard_data
              $ addStmts nest_segd_stmts nest_segd
              $ addStmts guard_data_stmts guard_data
+             $ moveWithDeps segelt body_segd nest_segd
              $ loop
 
 

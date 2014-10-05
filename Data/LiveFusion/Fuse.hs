@@ -458,12 +458,14 @@ replicate_sG uq len segd_loop elts_loop = loop
 
   -- body_result
   -- TODO: Check if optimised away. If not, move to body_source.
-  aVar      = eltVar elts_uq           -- an element from data arraay
+  aVar      = eltVar elts_uq
   bVar      = eltVar result_uq
   bBind     = bindStmt bVar (VarE aVar)
   body_result_stmts = [bBind]
 
   -- some label names
+  nest_segd   = nestLbl segd_uq
+  body_segd   = bodyLbl segd_uq
   init_result = initLbl result_uq
   body_result = bodyLbl result_uq
 
@@ -471,6 +473,8 @@ replicate_sG uq len segd_loop elts_loop = loop
   loop      = setArrResultOnly uq
             $ addStmts init_result_stmts init_result
             $ addStmts body_result_stmts body_result
+            -- aVar needs to be created before going into inner loop
+            $ moveWithDeps aVar body_segd nest_segd
             $ nested_loops
 
   nested_loops = nestLoops source_loop

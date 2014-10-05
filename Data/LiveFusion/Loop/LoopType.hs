@@ -214,6 +214,19 @@ replaceStmts :: [Stmt] -> Label -> Loop -> Loop
 replaceStmts stmts lbl = updateBlock lbl (setStmtsOfBlock stmts)
 
 
+-- | Moves the statement defining a variable and all of its dependencies
+--   to a different block
+moveWithDeps :: Var -> Label -> Label -> Loop -> Loop
+moveWithDeps v src dst loop = addStmts deps dst
+                            $ replaceStmts notDeps src
+                            $ loop
+  where
+    -- All statements of the source block
+    stmts = blockBodyStmts $ getBlock src loop
+
+    -- Those statements that are deps of v and those that aren't
+    (deps,notDeps) = extractWithDeps v stmts
+
 
 -------------------------------------------------------------------------------
 -- * Other loop functions
