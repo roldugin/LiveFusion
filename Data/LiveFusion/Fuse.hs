@@ -350,7 +350,7 @@ fold_sG uq f z segd_loop data_loop = loop
   zBind     = bindStmt zVar (TermE z)              
   init_segd_stmts = [zBind]
 
-  -- body_segd (run before each segment, and acts like init for the segment loop)
+  -- nest_segd (run before each segment, and acts like init for the segment loop)
   accVar    = var "acc" uq                -- accumulator
   accReset  = bindStmt accVar (VarE zVar) -- accumulator initialisation
   nest_segd_stmts = [accReset]
@@ -402,10 +402,10 @@ scan_sG uq f z segd_loop data_loop = loop
   zBind     = bindStmt zVar (TermE z)              
   init_segd_stmts = [zBind]
 
-  -- body_segd (run before each segment, and acts like init for the segment loop)
+  -- nest_segd (run before each segment, and acts like init for the segment loop)
   accVar    = var "acc" uq                -- accumulator
   accReset  = bindStmt accVar (VarE zVar) -- accumulator initialisation
-  body_segd_stmts = [accReset]
+  nest_segd_stmts = [accReset]
 
   -- body_data (run for each element)
   bVar      = eltVar uq
@@ -419,7 +419,7 @@ scan_sG uq f z segd_loop data_loop = loop
 
   -- some label names
   init_segd   = initLbl segd_uq
-  body_segd   = bodyLbl segd_uq
+  nest_segd   = nestLbl segd_uq
   body_data   = bodyLbl data_uq
   bottom_data = bottomLbl data_uq
 
@@ -428,7 +428,7 @@ scan_sG uq f z segd_loop data_loop = loop
             $ setScalarResult accVar
             -- Segd (segd_uq) stuff below
             $ addStmts init_segd_stmts init_segd
-            $ addStmts body_segd_stmts body_segd
+            $ addStmts nest_segd_stmts nest_segd
             -- Data (data_uq/uq) stuff below
             $ addStmts body_data_stmts body_data
             $ addStmts bottom_data_stmts bottom_data
@@ -497,9 +497,9 @@ indices_sG uq len segd_loop = loop
   resLenBind= bindStmt resLenVar (TermE len)
   init_result_stmts = [resLenBind]
 
-  -- body_segd (reset index counter)
+  -- nest_segd (reset index counter)
   bReset    = bindStmt bVar zeroE
-  body_segd_stmts = [bReset]
+  nest_segd_stmts = [bReset]
 
   -- bottom_result (increment counter)
   bIncr     = incStmt bVar
@@ -508,13 +508,13 @@ indices_sG uq len segd_loop = loop
   -- some label names
   init_result   = initLbl result_uq
   bottom_result = bottomLbl result_uq
-  body_segd     = bodyLbl segd_uq
+  nest_segd     = nestLbl segd_uq
 
   -- THE loop
   loop      = setArrResultOnly uq
             $ addStmts init_result_stmts init_result
             $ addStmts bottom_result_stmts bottom_result
-            $ addStmts body_segd_stmts body_segd
+            $ addStmts nest_segd_stmts nest_segd
             $ nested_loops
 
   nested_loops = nestLoops segd_loop
