@@ -39,7 +39,10 @@ pprBlockMap = unlines . map pprOne . sortOnKeysBy cmp . AMap.assocs
     pprOne (lbls, blk) = (pprLabels lbls) ++
                          (indent 1 $ pprBlock blk)
 
-    pprLabels = unlines . map (\l -> pprLabel l ++ ":") . Set.toList
+    pprLabels lblSet = let (first:rest) = Set.toList lblSet
+                           pprLabelId (Label _ n) = " _" ++ pprId n
+                       in  pprLabel first ++ concatMap pprLabelId rest ++ ":\n"
+
 
     cmp :: Set Label -> Set Label -> Ordering
     cmp s1 s2 = let Label nm1 id1 = theOneLabel s1
