@@ -32,29 +32,29 @@ pprLabel = show
 --------------------------------------------------------------------------------
 -- * Several predefined labels
 
-initNm, guardNm, bodyNm, yieldNm, bottomNm, doneNm, nestNm :: Name
+initNm, guardNm, nestNm, bodyNm, yieldNm, bottomNm, doneNm :: Name
 initNm   = "init"
 guardNm  = "guard"
+nestNm   = "nest"
 bodyNm   = "body"
 yieldNm  = "yield"
 bottomNm = "bottom"
 doneNm   = "done"
-nestNm   = "nest"  -- Not part of default label names
 
 
 -- | A list of standard label constructors
 stdLabelNames :: [Name]
-stdLabelNames = [initNm, guardNm, bodyNm, yieldNm, bottomNm, doneNm]
+stdLabelNames = [initNm, guardNm, nestNm, bodyNm, yieldNm, bottomNm, doneNm]
 
 
-initLbl, guardLbl, bodyLbl, yieldLbl, bottomLbl, doneLbl, nestLbl :: Id -> Label
+initLbl, guardLbl, nestLbl, bodyLbl, yieldLbl, bottomLbl, doneLbl :: Id -> Label
 initLbl   = Label initNm
 guardLbl  = Label guardNm
+nestLbl   = Label nestNm
 bodyLbl   = Label bodyNm
 yieldLbl  = Label yieldNm
 bottomLbl = Label bottomNm
 doneLbl   = Label doneNm
-nestLbl   = Label nestNm
 
 
 mkLabels :: [Name] -> Id -> [Label]
@@ -75,8 +75,8 @@ theOneLabel = Set.findMin
 -- | Rewrites one label to its synonym from the loop following a predefined
 --   convention.
 theSynonymLabel :: [Set Label] -> Label -> Label
-theSynonymLabel lbls l = theOneLabel $ synonyms
+theSynonymLabel lbls l = theOneLabel synonyms
   where
     synonyms = fromMaybe err
              $ find (l `Set.member`) lbls
-    err = error $ "theSynonymLabel: label" +-+ show l +-+ "not found in sets"
+    err = error $ "theSynonymLabel: label" +-+ pprLabel l +-+ "not found in sets:" ++\ show lbls

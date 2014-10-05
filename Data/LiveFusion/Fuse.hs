@@ -69,7 +69,6 @@ fuse env node uq = fuse' node uq
     tags_loop = fuse' tags uq
     arr_loop  = fuse' arr uq
 
-  -- See comment [1] at the bottom of the file
   fuse' (Fold_sG f z segd dat) uq = fold_sG uq f z' segd_loop data_loop
    where
     data_loop = fuse' dat uq
@@ -354,14 +353,11 @@ fold_sG uq f z segd_loop data_loop = loop
   -- body_segd (run before each segment, and acts like init for the segment loop)
   accVar    = var "acc" uq                -- accumulator
   accReset  = bindStmt accVar (VarE zVar) -- accumulator initialisation
-  body_segd_stmts = [accReset]
+  nest_segd_stmts = [accReset]
 
-  -- NEW body_segd' separate from body_segd (run post inner loop)
-  -- not much here besides the reassigning acc to elt
-  -- but we did have to separate it from the previous body (segd_uq)
   bVar      = eltVar uq              -- an element of the result array
   bBind     = bindStmt bVar (VarE accVar)
-  body_segd_stmts' = [bBind]
+  body_segd_stmts = [bBind]
 
   -- bottom_data (run for each element)
   fApp      = fun2 f accVar aVar
@@ -370,8 +366,8 @@ fold_sG uq f z segd_loop data_loop = loop
 
   -- some label names
   init_segd   = initLbl segd_uq
+  nest_segd   = nestLbl segd_uq
   body_segd   = bodyLbl segd_uq
-  body_segd'  = bodyLbl uq
   bottom_data = bottomLbl data_uq
 
   -- THE loop
@@ -380,8 +376,8 @@ fold_sG uq f z segd_loop data_loop = loop
             $ setScalarResult accVar
             -- Segd (segd_uq) stuff below
             $ addStmts init_segd_stmts init_segd
+            $ addStmts nest_segd_stmts nest_segd
             $ addStmts body_segd_stmts body_segd
-            $ addStmts body_segd_stmts' body_segd'
             -- Data (data_uq/uq) stuff below
             $ addStmts bottom_data_stmts bottom_data
             -- The usual stuff
@@ -618,7 +614,7 @@ mergeLoops new_uq loops
 -- | Adds predefined control flow for nested loops.
 --
 -- The function takes segd_loop, data_loop,
--- id of rate (usually either segd_uq or data_uq) and id of result loop.
+-- id of rate (either segd_uq or data_uq) and id of result loop.
 --
 -- See comment [1] at the bottom of the file
 nestLoops :: Loop -> Loop -> Unique -> Unique -> Loop
@@ -627,71 +623,22 @@ nestLoops segd_loop data_loop rate_uq new_uq = loop
   segd_uq    = getJustRate segd_loop
   data_uq    = getJustRate data_loop
 
-  -- body_segd (run before each segment, and acts like init for the segment loop)
-  seglenVar  = eltVar segd_uq
-  segendVar  = var "end" new_uq  -- element counter that is updated for every segment
-  segendSet  = bindStmt segendVar (fun2 plusInt ixVar seglenVar)
-  body_segd_stmts = [segendSet]
-
-  -- guard_data
-  ixVar      = indexVar data_uq
-  grd        = guardStmt (fun2 ltInt ixVar segendVar) inner_loop_exit
-  guard_data_stmts = [grd]
-  
   -- labels
-  init_      = initLbl new_uq
-  guard_segd = guardLbl segd_uq
-  body_segd  = bodyLbl segd_uq
-  body_segd' = bodyLbl new_uq
-  yield_segd = yieldLbl segd_uq
-  guard_data = guardLbl data_uq
-
-  inner_loop_exit
-    | rate_uq == segd_uq = body_segd'
-    | rate_uq == data_uq = yield_segd
-    | otherwise = err_BAD_RATE
+  init_segd  = initLbl segd_uq
+  init_data  = initLbl data_uq
+  done_segd  = doneLbl segd_uq
+  done_data  = doneLbl data_uq
 
   -- THE loop
   loop = setTheRate new_uq
        $ reuseRate new_uq rate_uq
-       -- Start with outer (segd) loop
-       $ setFinalGoto init_ guard_segd
-       -- Body of segd loop *before* going into inner loop
-       $ addStmts body_segd_stmts body_segd
-       $ setFinalGoto body_segd guard_data
-       -- Replace statements in guard of data (assuming segd is correct)
-       $ replaceStmts guard_data_stmts guard_data
        $ addToSkipTests data_uq
-       $ loop'
-
-  -- Unite the new loop with whatever loop provides the correct rate.
-  loop'
-    -- The new loop produces elements at the rate of segd
-    | rate_uq == segd_uq
-      -- Body of segd loop *after* coming back from inner loop
-    = setFinalGoto body_segd' yield_segd
-      -- Don't unite the body block! (see comment)
-    $ addSynonymLabels (List.delete bodyNm stdLabelNames) new_uq segd_uq
-    $ merged_loops
-    -- The new loop produces elements at the rate of data
-    | rate_uq == data_uq
-    = addSynonymLabels stdLabelNames new_uq data_uq
-    $ merged_loops
-    -- Rate not recognised
-    | otherwise = err_BAD_RATE
-
-  merged_loops
-    -- Note: Order of appending matters given the order of synonyms
-    = Loop.append data_loop
-    $ addSynonymLabel (initLbl data_uq) (initLbl segd_uq)
-    $ addSynonymLabel (doneLbl data_uq) (doneLbl segd_uq)
-    $ segd_loop
-
-  err_BAD_RATE :: a
-  err_BAD_RATE = error
-               $ "nestLoops: Passed rate" +-+ show rate_uq +-+
-                 "does not match segd" +-+ (paren $ show segd_uq) +-+
-                 "or data" +-+ (paren $ show data_uq) +-+ "rates."
+       $ setNesting (segd_uq, data_uq)
+       $ addDefaultSynonymLabels new_uq rate_uq
+       $ Loop.append segd_loop
+       $ addSynonymLabel init_segd init_data
+       $ addSynonymLabel done_segd done_data
+       $ data_loop
 
 
 -- | Sets the upper bound of an array to be the same as that of another array.
@@ -703,39 +650,3 @@ nestLoops segd_loop data_loop rate_uq new_uq = loop
 rebindLengthVar :: Unique -> Unique -> Loop -> Loop
 rebindLengthVar curr prev = addStmt stmt (initLbl curr)
   where stmt = bindStmt (lengthVar curr) (VarE $ lengthVar prev)
-
-
-{- [1]
-fold_s and other reductions run at the rate of the segment descriptor.
-This means they result in one element per segment.
-Thus the yielding loop is the outer one.
-So we could do
-@
-body_segd:
-  elt_segd = ...
-  goto guard_data
-guard_data:
-  unless ... goto yield_segd
-@
-
-The problem is that there may be more combinators consuming the output of fold_s, e.g.:
-
-@ map f $ fold_s f z segd arr @
-
-The `map` will insert its body statements into the `body_segd`
-where the result of folding a segment is not yet available.
-
-One possible solution is to have a new `body_segd'` block
-which will be entered after each segment is complete:
-@
-body_segd:
-  elt_segd = ...
-  goto guard_data
-guard_data:
-  unless ix < segend | goto body_segd'
-body_segd':
-  ...
-@
-This could actually be the general solution for all combinators
-but we will only apply it to segmented combinators with segd output rates for now.
--}  

@@ -48,6 +48,10 @@ data Loop = Loop { -- | Loop entry block
                  , loopRates        :: IntDisjointSet
 
 
+                   -- | For segmented array operations: Just (segd_uq, data_uq)
+                 , loopNest         :: Maybe (Unique, Unique)
+
+
                    -- | Guard tests and index initialisation/increments that need *not* be inserted
                  , loopSkipTests    :: [Unique]  -- These are for the postprocessing step
                  , loopSkipIncrs    :: [Unique]  -- and should probably be dealt with more elegantly.
@@ -67,25 +71,38 @@ instance Show Loop where
 
 pprLoop :: Loop -> String
 pprLoop loop
-    = "Loop Entry:    "  ++  maybe "None" pprLabel (loopEntry loop)                   ++\
-      "Loop Args:     "  ++  (show $ Map.keys $ loopArgs loop)                        ++\
-      "Array Result:  "  ++  maybe "None" (pprVar . arrayVar) (loopArrResult loop)    ++\
-      "Scalar Result: "  ++  maybe "None" pprVar              (loopScalarResult loop) ++\
-      "The rate:      "  ++  maybe "None" pprId               (loopTheRate loop)      ++\
-      "Rates:         "  ++  pprDisjointSet (loopRates loop)                          ++\
-      "Skip inserting:" ++\
-      "  Inits/Incrs: "  ++  show (loopSkipIncrs loop)                                ++\
-      "  Tests:       "  ++  show (loopSkipTests loop)                                ++\
-      "BlockMap:      "  ++\ pprBlockMap (loopBlockMap loop)
+  = "Loop Entry:    "  ++  maybe "None" pprLabel (loopEntry loop)                   ++\
+    "Loop Args:     "  ++  (show $ Map.keys $ loopArgs loop)                        ++\
+    "Array Result:  "  ++  maybe "None" (pprVar . arrayVar) (loopArrResult loop)    ++\
+    "Scalar Result: "  ++  maybe "None" pprVar              (loopScalarResult loop) ++\
+    "The rate:      "  ++  maybe "None" pprId               (loopTheRate loop)      ++\
+    "Rates:         "  ++  pprDisjointSet (loopRates loop)                          ++\
+    "Nesting:       "  ++  maybe "None" pprNest             (loopNest loop)         ++\
+    "Skip inserting:" ++\
+    "  Inits/Incrs: "  ++  show (loopSkipIncrs loop)                                ++\
+    "  Tests:       "  ++  show (loopSkipTests loop)                                ++\
+    "BlockMap:      "  ++\ pprBlockMap (loopBlockMap loop)
+  where
+    pprNest (s,d) = "(segd " ++ pprId s ++ ", data " ++ pprId d ++ ")"
 
 
 
 -------------------------------------------------------------------------------
 -- * Merging loops
 
-{- loopEntry, loopArgs, loopArrResult, loopScalarResult, loopTheRate, loopRates, loopInsertIncrs, loopInsertTests, loopBlockMap -}
 instance Monoid Loop where
-  mempty = Loop Nothing Map.empty Nothing Nothing Nothing Rates.empty [] [] AMap.empty
+  mempty
+    = Loop { loopEntry        = Nothing
+           , loopArgs         = Map.empty
+           , loopArrResult    = Nothing
+           , loopScalarResult = Nothing
+           , loopTheRate      = Nothing
+           , loopRates        = Rates.empty
+           , loopNest         = Nothing
+           , loopSkipIncrs    = []
+           , loopSkipTests    = []
+           , loopBlockMap     = AMap.empty
+           }
   mappend loop1 loop2
     = Loop { loopEntry        = loopEntry     `joinWith` (<|>)
            , loopArgs         = loopArgs      `joinWith` Map.union
@@ -93,6 +110,7 @@ instance Monoid Loop where
            , loopScalarResult = Nothing
            , loopTheRate      = loopTheRate   `joinWith` (<|>)
            , loopRates        = loopRates     `joinWith` Rates.merge
+           , loopNest         = loopNest      `joinWith` (<|>)
            , loopSkipIncrs    = loopSkipIncrs `joinWith` (++)
            , loopSkipTests    = loopSkipTests `joinWith` (++)
            , loopBlockMap     = loopBlockMap  `joinWith` AMap.unionWith mergeBlocks
@@ -250,6 +268,14 @@ freshRate :: Unique -> Loop -> Loop
 freshRate rate loop = loop { loopRates = Rates.insert rate (loopRates loop) }
 
 
+-- | Sets @(segd_rate, data_rate)@ of a @loop@.
+setNesting :: (Unique, Unique) -> Loop -> Loop
+setNesting rates loop = loop { loopNest = Just rates }
+
+
+getNesting :: Loop -> Maybe (Unique, Unique)
+getNesting = loopNest
+
 
 
 -------------------------------------------------------------------------------
@@ -305,7 +331,8 @@ addDefaultControlFlow :: Id -> Loop -> Loop
 addDefaultControlFlow uq loop
   = foldl addFinalGoto loop
   $ [ (initLbl   , guardLbl)  -- Init   -> Guard
-    , (guardLbl  , bodyLbl)   -- Guard  -> Body
+    , (guardLbl  , nestLbl)   -- Guard  -> Nest
+    , (nestLbl   , bodyLbl)   -- Nest   -> Body
     , (bodyLbl   , yieldLbl)  -- Body   -> Yield
     , (yieldLbl  , bottomLbl) -- Yield  -> Bottom
     , (bottomLbl , guardLbl)  -- Bottom -> Guard

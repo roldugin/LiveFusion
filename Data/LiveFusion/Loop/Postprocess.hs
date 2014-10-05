@@ -1,3 +1,4 @@
+{-# LANGUAGE ViewPatterns #-}
 module Data.LiveFusion.Loop.Postprocess where
 
 import Data.LiveFusion.Loop.Common
@@ -13,6 +14,7 @@ import Data.LiveFusion.Scalar.HOAS as HOAS
 import Data.LiveFusion.DisjointSet as Rates
 import Data.LiveFusion.AliasMap ( AliasMap )
 import qualified Data.LiveFusion.AliasMap as AMap
+import Data.LiveFusion.Util
 
 import Data.Maybe
 import Data.List
@@ -26,6 +28,7 @@ postprocessLoop loop = rewriteLoopLabelsAndRates
                      $ reorderDecls
                      $ removeClashingStmts
                      $ writeResultArray uq
+                     $ maybeNestLoops
                      $ insertTests
                      $ insertIncrs
                      $ loop
@@ -106,6 +109,54 @@ writeResultArray uq loop = process loop
         >>> addStmt write (yieldLbl uq)
         >>> addStmt slice (doneLbl uq)
         >>> addStmt ret   (doneLbl uq)
+
+
+-- | Inserts statements allowing the nesting to happen
+-- @
+--  nest_segd:
+--    seglen = readArray arr_segd i_segd
+--    segend = i_data + seglen
+--    goto guard_data
+--  guard_data:
+--    unless i_data < segend | body_segd
+--  body_segd:
+--    ...
+-- @
+maybeNestLoops :: Loop -> Loop
+maybeNestLoops loop@(getNesting -> Nothing) = loop
+maybeNestLoops loop@(getNesting -> Just (segd_uq, data_uq)) = loop'
+ where
+  -- nest_segd (run before each segment, acts like init for inner loop)
+  segdVar    = arrayVar segd_uq
+  segnumVar  = indexVar segd_uq
+  seglenVar  = eltVar segd_uq
+  -- for now assume segd is a manifest array and read it explicitely
+  seglenRead = readArrStmt seglenVar segdVar (VarE segnumVar)
+  segendVar  = var "end" segd_uq  -- end of segment index
+  segendSet  = bindStmt segendVar (fun2 plusInt ixVar seglenVar)
+  nest_segd_stmts = [seglenRead, segendSet]
+
+  -- guard_data (have we reached the end of segment?)
+  ixVar      = indexVar data_uq
+  segendTest = guardStmt (fun2 ltInt ixVar segendVar) body_segd
+  guard_data_stmts = [segendTest]
+  
+  -- labels
+  init_      = initLbl segd_uq
+  guard_segd = guardLbl segd_uq
+  nest_segd  = nestLbl segd_uq
+  body_segd  = bodyLbl segd_uq
+  guard_data = guardLbl data_uq
+
+  -- THE loop
+  loop'      = id
+             -- Start with outer (segd) loop
+             $ setFinalGoto init_ guard_segd
+             -- Enter inner loop after setting up segment bounds
+             $ setFinalGoto nest_segd guard_data
+             $ addStmts nest_segd_stmts nest_segd
+             $ addStmts guard_data_stmts guard_data
+             $ loop
 
 
 -- | All declarations must go first in the block.
