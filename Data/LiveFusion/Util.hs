@@ -5,6 +5,15 @@ import Data.List
 import Text.Printf
 import Debug.Trace
 
+dEBUG :: Bool
+dEBUG = False
+
+
+log :: String -> a -> a
+log str a | dEBUG == True = trace str a
+          | otherwise     = a
+
+
 -- | Concatenate two strings with newline.
 infixr 5  ++\
 (++\) :: String -> String -> String

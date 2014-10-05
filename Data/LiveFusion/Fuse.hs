@@ -15,6 +15,8 @@ import Data.Map as Map hiding ( map, filter, foldr )
 import Data.Maybe
 import Data.Typeable
 
+import Prelude hiding ( log )
+
 
 fuse :: Typeable e => Map Unique (WrappedASG Unique) -> (ASG e Unique) -> Unique -> Loop
 fuse env node uq = fuse' node uq
@@ -27,19 +29,27 @@ fuse env node uq = fuse' node uq
     node = fromJust
          $ (getASTNode env uq) `asTypeOf` (Just var)
 
-  fuse' (ManifestG vec) uq = manifestG uq vec
 
-  fuse' (MapG f arr)    uq = mapG uq f arr_loop
+  fuse' (ManifestG vec) uq = what $ manifestG uq vec
+   where
+    what     = lc "Manifest" uq
+
+
+  fuse' (MapG f arr) uq = what $ mapG uq f arr_loop
    where
     arr_loop = fuse' arr uq  -- TODO: this uq means nothing
+    what     = lc "Map" uq
 
-  fuse' (ZipWithG f arr brr) uq = zipWithG uq f arr_loop brr_loop
+
+  fuse' (ZipWithG f arr brr) uq = what $ zipWithG uq f arr_loop brr_loop
    where
     arr_loop = fuse' arr uq
     brr_loop = fuse' brr uq
+    what     = lc "ZipWith" uq
+
 
   fuse' (ZipWith6G f arr brr crr drr err frr) uq
-    = zipWith6G uq f arr_loop brr_loop crr_loop drr_loop err_loop frr_loop
+    = what $ zipWith6G uq f arr_loop brr_loop crr_loop drr_loop err_loop frr_loop
    where
     arr_loop = fuse' arr uq
     brr_loop = fuse' brr uq
@@ -47,48 +57,67 @@ fuse env node uq = fuse' node uq
     drr_loop = fuse' drr uq
     err_loop = fuse' err uq
     frr_loop = fuse' frr uq
+    what     = lc "ZipWith6" uq
 
-  fuse' (FilterG p arr) uq = filterG uq p arr_loop
+
+  fuse' (FilterG p arr) uq = what $ filterG uq p arr_loop
    where
     arr_loop = fuse' arr uq
+    what     = lc "Filter" uq
 
-  fuse' (ScanG f z arr) uq = scanG uq f z' arr_loop
+
+  fuse' (ScanG f z arr) uq = what $ scanG uq f z' arr_loop
    where
     arr_loop = fuse' arr uq
     z'       = getScalar z uq
+    what     = lc "Scan" uq
 
-  fuse' (ReplicateG n x) uq = replicateG uq n x
 
-  fuse' (BpermuteG arr ixs) uq = bpermuteG uq arr_loop ixs_loop
+  fuse' (ReplicateG n x) uq = what $ replicateG uq n x
+   where
+    what     = lc "Replicate" uq
+
+
+  fuse' (BpermuteG arr ixs) uq = what $ bpermuteG uq arr_loop ixs_loop
    where
     arr_loop = fuse' arr uq
     ixs_loop = fuse' ixs uq
+    what     = lc "Bpermute" uq
 
-  fuse' (PackByBoolTagG tag tags arr) uq = packByBoolTagG uq tag tags_loop arr_loop
+
+  fuse' (PackByBoolTagG tag tags arr) uq = what $ packByBoolTagG uq tag tags_loop arr_loop
    where
     tags_loop = fuse' tags uq
     arr_loop  = fuse' arr uq
+    what      = lc "PackByBoolTag" uq
 
-  fuse' (Fold_sG f z segd dat) uq = fold_sG uq f z' segd_loop data_loop
+
+  fuse' (Fold_sG f z segd dat) uq = what $ fold_sG uq f z' segd_loop data_loop
    where
     data_loop = fuse' dat uq
     segd_loop = fuse' segd uq
     z'        = getScalar z uq
+    what      = lc "Fold_s" uq
 
-  fuse' (Scan_sG f z segd dat) uq = scan_sG uq f z' segd_loop data_loop
+
+  fuse' (Scan_sG f z segd dat) uq = what $ scan_sG uq f z' segd_loop data_loop
    where
     data_loop = fuse' dat uq
     segd_loop = fuse' segd uq
     z'        = getScalar z uq
+    what      = lc "Scan_s" uq
 
-  fuse' (Replicate_sG len segd dat) uq = replicate_sG uq len segd_loop data_loop
-   where
-   	data_loop = fuse' dat uq
-   	segd_loop = fuse' segd uq
 
-  fuse' (Indices_sG len segd) uq = indices_sG uq len segd_loop
+  fuse' (Replicate_sG len segd dat) uq = what $ replicate_sG uq len segd_loop data_loop
    where
-   	segd_loop = fuse' segd uq
+    data_loop = fuse' dat uq
+    segd_loop = fuse' segd uq
+    what      = lc "Replicate_s" uq
+
+  fuse' (Indices_sG len segd) uq = what $ indices_sG uq len segd_loop
+   where
+    segd_loop = fuse' segd uq
+    what      = lc "Indices_s" uq
 
 
   -- | We store scalars in AST/ASG however, we're not yet clever about computing them.
@@ -99,6 +128,7 @@ fuse env node uq = fuse' node uq
               $ (getASTNode env uq) `asTypeOf` (Just var)
   getScalar (ScalarG term) _ = term
   getScalar _ _ = error "getScalar: Failed scalar lookup. Make sure the scalar argument is constructed with Scalar AST constructor."
+
 
 
 -------------------------------------------------------------------------------
@@ -654,3 +684,9 @@ nestLoops segd_loop data_loop rate_uq new_uq = loop
 rebindLengthVar :: Unique -> Unique -> Loop -> Loop
 rebindLengthVar curr prev = addStmt stmt (initLbl curr)
   where stmt = bindStmt (lengthVar curr) (VarE $ lengthVar prev)
+
+
+-- | Log combinator if D.LF.Util.dEBUG is on.
+lc :: String -> Unique -> a -> a
+lc str uq = log (str +-+ pprId uq)
+
