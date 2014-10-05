@@ -170,6 +170,10 @@ B := A                           D := C
 -------------------------------------------------------------------------------
 -- * Pretty printing
 
+instance Show Stmt where
+  show = pprStmt
+
+
 pprStmt :: Stmt -> String
 pprStmt (Bind v e)     = "let" +-+ pprVar v +-+ "=" +-+ pprExpr e
 pprStmt (Assign v e)   = pprVar v +-+ ":=" +-+ pprExpr e
@@ -182,6 +186,29 @@ pprStmt (WriteArray arr i x)    = "writeArray" +-+ pprVar arr +-+ pprExpr i +-+ 
 pprStmt (ArrayLength i arr)     = "let" +-+ pprVar i +-+ "= arrayLength" +-+ pprVar arr
 pprStmt (SliceArray arr' arr n) = "let" +-+ pprVar arr' +-+ "= sliceArray" +-+ pprVar arr +-+ pprExpr n
 pprStmt (Return e)     = "return" +-+ pprExpr e
+
+
+
+-------------------------------------------------------------------------------
+-- * Fancy stuff
+
+-- | Splits a list of statements to those required to define the given @Var@
+--   and the rest.
+extractWithDeps :: Var -> [Stmt] -> ([Stmt],[Stmt])
+extractWithDeps v = extract [v]
+  where
+    extract vs stmts
+      = let -- find statements that bind vs
+            (found, rest) = partition (bindsAny vs) stmts
+            -- find all variables those statements reference
+            moreDeps = concatMap references found
+            -- find statements that bind those
+            (moreFound, rest') = extract moreDeps rest
+        in  (found ++ moreFound, rest')
+
+    bindsAny vs stmt = case bindsMb stmt of
+                         Just v  -> v `elem` vs
+                         Nothing -> False
 
 
 -------------------------------------------------------------------------------
