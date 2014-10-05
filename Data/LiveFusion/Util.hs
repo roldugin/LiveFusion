@@ -43,7 +43,7 @@ indexed = unlines . indexed' . lines
   where
     indexed' :: [String] -> [String]
     indexed' = zipWith space
-                         (map linum [1..])
+                       (map linum [2..])  -- GHC errors are off by 1 line
     linum (i::Int) = printf "%2d" i
 
 
