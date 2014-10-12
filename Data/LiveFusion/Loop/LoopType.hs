@@ -169,6 +169,16 @@ setFinalGoto from to = updateBlock from
                                    (setBlockFinal $ gotoStmt to)
 
 
+-- | Moves the final statement between blocks
+moveFinalStmt :: Label -> Label -> Loop -> Loop
+moveFinalStmt from to loop
+  = updateBlock from unsetBlockFinal
+  $ updateBlock to   (setBlockFinalMb final)
+  $ loop
+  where
+    final = blockFinalStmt $ getBlock from loop
+
+
 -- | Add an empty block to the loop. Does nothing if the block exists
 touchBlock :: Label -> Loop -> Loop
 touchBlock label loop = updateBlock label id {-do nothing-} loop

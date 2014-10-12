@@ -42,9 +42,24 @@ bottomNm = "bottom"
 doneNm   = "done"
 
 
+-- | Labels that are normally shared by loops of all rates
+stdSharedNames :: [Name]
+stdSharedNames = [initNm, doneNm]
+
+
+-- | Labels that are shared by loops of "compatible" rates
+stdSubrateNames :: [Name]
+stdSubrateNames = [guardNm]
+
+
+-- | Labels that are shared by the the same rate
+stdRateNames :: [Name]
+stdRateNames = [nestNm, bodyNm, yieldNm, bottomNm]
+
+
 -- | A list of standard label constructors
 stdLabelNames :: [Name]
-stdLabelNames = [initNm, guardNm, nestNm, bodyNm, yieldNm, bottomNm, doneNm]
+stdLabelNames = stdSharedNames ++ stdSubrateNames ++ stdRateNames
 
 
 initLbl, guardLbl, nestLbl, bodyLbl, yieldLbl, bottomLbl, doneLbl :: Id -> Label
@@ -55,6 +70,8 @@ bodyLbl   = Label bodyNm
 yieldLbl  = Label yieldNm
 bottomLbl = Label bottomNm
 doneLbl   = Label doneNm
+
+
 
 
 mkLabels :: [Name] -> Id -> [Label]

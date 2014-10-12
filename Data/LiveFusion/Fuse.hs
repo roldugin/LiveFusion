@@ -246,38 +246,21 @@ filterG uq p arr_loop = loop
   bVar       = eltVar uq
   ixVar      = indexVar uq   -- writing index
 
-  -- init
-  ixInit     = bindStmt ixVar (LitE (0::Int))  -- index initialization
-  init_stmts = [ixInit]
-
-  -- body
+  -- body_uq
   predExp    = fun1 p aVar
-  guard      = guardStmt predExp bottom_
+  guard      = guardStmt predExp bottom_sub
   bBind      = bindStmt bVar (VarE aVar)
-  body_stmts = [guard, bBind]
-
-  -- yield
-  ixUpdate   = incStmt ixVar
-  yield_stmts = [ixUpdate]
+  body_stmts = [bBind, guard]
 
   -- labels
-  init_      = initLbl uq
-  body_      = bodyLbl uq
-  yield_     = yieldLbl uq
-  bottom_    = bottomLbl uq
+  body_sub   = bodyLbl uq
+  bottom_sub = bottomLbl uq
 
   -- THE loop
   loop       = setArrResultOnly uq
-             $ addStmts init_stmts  init_
-             $ addStmts body_stmts  body_
-             $ addStmts yield_stmts yield_
-             -- Note that we aren't reusing the rate since read/write indexes are not synchronised
-             $ freshRate       uq
+             $ addStmts body_stmts  body_sub
              $ rebindLengthVar uq arr_uq
-             $ addDefaultSynonymLabels uq arr_uq
-             $ setTheRate uq
-             $ addToSkipTests uq
-             $ addToSkipIncrs uq
+             $ addSubrateBlocks uq
              $ arr_loop
 
 
@@ -643,6 +626,64 @@ mergeLoops new_uq loops
         in  reuseRate                 new_uq loop_uq
   	        $ addDefaultSynonymLabels new_uq loop_uq
   	        $ loop
+
+
+-- | Adds fresh nest/body/yield/bottom blocks
+--   reusing init/guard/done of the parent rate loop (call it super rate).
+--
+-- Example (all non-control flow statements omitted)
+-- init_supr, init_sub:
+--   goto guard_supr
+-- guard_supr, guard_sub:
+--   unless ... goto done_supr
+--   goto nest_supr
+-- nest_supr:
+--   goto body_supr
+-- body_supr:
+--   goto yield_supr
+-- yield_supr:
+--   goto nest_sub   <-- note, going into subrate body
+-- 
+--     nest_sub:
+--       goto yield_sub
+--     yield_sub:
+--       goto bottom_sub
+--     bottom_sub:
+--       goto bottom_supr  <-- whatever yield_supr used to point to
+-- 
+-- bottom_supr:
+--   goto guard_supr
+-- done_supr, done_sub:
+--
+addSubrateBlocks :: Unique -> Loop -> Loop
+addSubrateBlocks sub_uq supr_loop = loop
+ where
+  supr_uq = getJustRate supr_loop
+
+  -- labels
+  yield_supr  = yieldLbl supr_uq
+  bottom_supr = bottomLbl supr_uq
+
+  nest_sub    = nestLbl sub_uq
+  body_sub    = bodyLbl sub_uq
+  yield_sub   = yieldLbl sub_uq
+  bottom_sub  = bottomLbl sub_uq
+  
+  -- THE loop
+  loop = setTheRate sub_uq
+       $ addToSkipTests sub_uq
+       $ freshRate sub_uq
+       -- Add control flow to get in and out of sub
+       $ setFinalGoto yield_supr nest_sub
+       $ moveFinalStmt yield_supr bottom_sub
+       -- Insert control flow between sub block
+       $ setFinalGoto nest_sub body_sub
+       $ setFinalGoto body_sub yield_sub
+       $ setFinalGoto yield_sub bottom_sub
+       -- Unite init, guard and done
+       $ addSynonymLabels stdSubrateNames sub_uq supr_uq
+       $ addSynonymLabels stdSharedNames sub_uq supr_uq
+       $ supr_loop
 
 
 -- | Adds predefined control flow for nested loops.

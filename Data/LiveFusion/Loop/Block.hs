@@ -26,6 +26,10 @@ blockBodyStmts :: Block -> [Stmt]
 blockBodyStmts (Block stmts _) = stmts
 
 
+blockFinalStmt :: Block -> Maybe Stmt
+blockFinalStmt (Block _ final) = final
+
+
 blockStmts :: Block -> [Stmt]
 blockStmts (Block stmts final) = stmts ++ maybeToList final
 
@@ -42,7 +46,11 @@ setStmtsOfBlock stmts (Block _ final0) = Block stmts final0
 
 
 setBlockFinal :: Stmt -> Block -> Block
-setBlockFinal final (Block stmts _) = Block stmts (Just final)
+setBlockFinal final = setBlockFinalMb (Just final)
+
+
+setBlockFinalMb :: Maybe Stmt -> Block -> Block
+setBlockFinalMb final (Block stmts _) = Block stmts final
 
 
 unsetBlockFinal :: Block -> Block

@@ -67,7 +67,7 @@ insertIncrs loop = foldl insertIncr loop toInsert
   allRates = representatives (loopRates loop)
 
   insertIncr loop uq' = addStmt indexInit init_
-                      $ addStmt indexIncr bottom_
+                      $ addStmt indexIncr yield_
                       $ loop
    where
     uq        = Rates.representative uq' (loopRates loop)
@@ -77,8 +77,8 @@ insertIncrs loop = foldl insertIncr loop toInsert
     indexInit = bindStmt ix (TermE (0 :: Term Int))
     indexIncr = incStmt ix
 
-    init_     = initLbl   uq
-    bottom_   = bottomLbl uq
+    init_     = initLbl  uq
+    yield_    = yieldLbl uq
 
 
 rewriteLoopLabelsAndRates :: Loop -> Loop
