@@ -73,7 +73,9 @@ bpermute
         => Array a      -- ^ Source array.
         -> Array Int    -- ^ Indices in the source to copy elements from.
         -> Array a
-bpermute arr ixs = Bpermute arr ixs
+bpermute arr ixs = Bpermute (rebaseManifest' arr) ixs
+-- Rebase the AST on top of Manifest' to ensure that the subtree is not shared.
+-- TODO This is a hack until the time we have pure sharing and rate inference.
 
 
 packByBoolTag :: Elt a => Term Bool -> Array Bool -> Array a -> Array a

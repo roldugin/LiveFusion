@@ -216,6 +216,10 @@ instance Typeable e => MuRef (AST e) where
       mapDeRef' ap (Manifest vec)
         = pure $ ManifestG vec
 
+      -- | Both Manifest and Manifest' map to ManifestG
+      mapDeRef' ap (Manifest' vec)
+        = pure $ ManifestG vec
+
       mapDeRef' ap (Scalar x)
         = pure $ ScalarG x
 

@@ -103,9 +103,47 @@ data AST e where
            => V.Vector a
            -> ArrayAST a
 
+  -- | TODO We use this one when we need to prevent
+  --   observable sharing. It's largely a hack.
+  Manifest':: Elt a
+           => V.Vector a
+           -> ArrayAST a
+
   Scalar   :: Elt a
            => Term a
            -> ScalarAST a
+
+
+
+-- | Traverse AST calling the given function for each node.
+--
+-- You probably want this the two functions to be mutually recursive.
+trav :: (forall t1 . AST t1 -> AST t1)
+     -> AST t -> AST t
+trav ap = go
+ where
+  go (Map f a) = Map f (ap a)
+  go (Filter p a)  = Filter p (ap a)
+  go (ZipWith f a b) = ZipWith f (ap a) (ap b)
+  go (ZipWith6 f' a b c d e f) = ZipWith6 f' (ap a) (ap b) (ap c) (ap d) (ap e) (ap f)
+  go (Fold f z a) = Fold f z (ap a)
+  go (Scan f z a) = Scan f (ap z) (ap a)
+  go (Replicate n x) = Replicate n x
+  go (Bpermute a i) = Bpermute (ap a) (ap i)
+  go (PackByBoolTag t ts a) = PackByBoolTag t (ap ts) (ap a)
+  go (Fold_s f z s a) = Fold_s f (ap z) (ap s) (ap a)
+  go (Scan_s f z s a) = Scan_s f (ap z) (ap s) (ap a)
+  go (Replicate_s n s a) = Replicate_s n (ap s) (ap a)
+  go (Indices_s n s) = Indices_s n (ap s)
+  go (Manifest v) = Manifest v
+  go (Manifest' v) = Manifest' v
+  go (Scalar v) = Scalar v
+
+
+-- | Rebases AST on top of Manifest' instead of Manifest
+rebaseManifest' :: AST t -> AST t
+rebaseManifest' (Manifest vec) = Manifest' vec
+rebaseManifest' ast = trav rebaseManifest' ast
 
 
 showAST :: AST e -> String
