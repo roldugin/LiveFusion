@@ -15,7 +15,7 @@ data Label = Label Name Id
 
 
 instance Show Label where
-  show (Label nm i) = nm ++ "_" ++ show i
+  show = pprLabel
 
 
 class LabelContainer c where
@@ -23,7 +23,7 @@ class LabelContainer c where
 
 
 pprLabel :: Label -> String
-pprLabel = show
+pprLabel (Label nm i) = pprName nm ++ "_" ++ pprId i
 
 
 -------------------------------------------------------------------------------

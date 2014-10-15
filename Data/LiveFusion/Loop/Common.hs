@@ -11,5 +11,10 @@ type Id = Unique
 
 type Arg = Dynamic
 
+
 pprId :: Id -> String
 pprId = show
+
+
+pprName :: Name -> String
+pprName = id

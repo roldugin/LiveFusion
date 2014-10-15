@@ -18,10 +18,6 @@ var :: Name -> Id -> Var
 var = IdVar
 
 
-pprName :: Name -> String
-pprName = id
-
-
 pprVar :: Var -> String
 pprVar (IdVar name ident) = pprName name ++ "_" ++ pprId ident
 pprVar (SimplVar name) = pprName name
