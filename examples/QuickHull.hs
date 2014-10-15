@@ -10,14 +10,15 @@ import Prelude as P hiding ( map, replicate, zip, zipWith, filter, fst, snd )
 
 
 
-farAndAbove :: Term Int                      -- Number of lines
-            -> Array Int                     -- Segd
-            -> Array Double -> Array Double  -- Points
-            -> Array Double -> Array Double  -- Line starts
-            -> Array Double -> Array Double  -- Line ends
-            -> (Array Double, Array Double,  -- Farthest points
-                Array Double, Array Double,  -- Points above lines
-                Array Int)                   -- New segd
+farAndAbove :: (IsNum a, IsOrd a, Elt a)
+            => Term Int            -- Number of lines
+            -> Array Int           -- Segd
+            -> Array a -> Array a  -- Points
+            -> Array a -> Array a  -- Line starts
+            -> Array a -> Array a  -- Line ends
+            -> (Array a, Array a,  -- Farthest points
+                Array a, Array a,  -- Points above lines
+                Array Int)         -- New segd
 farAndAbove npts segd xs ys x1s y1s x2s y2s
   = let -- Find distance-like measures between each point and its respective line.
         distances = calcCross npts segd xs ys x1s y1s x2s y2s
@@ -34,16 +35,17 @@ farAndAbove npts segd xs ys x1s y1s x2s y2s
 -- | Find (relative) distances of points from line.
 --
 -- Each point can be above (positive distance) or below (negative distance)
--- a line as looking from the center of the convex hull.
+-- a line as looking from the centre of the convex hull.
 --
 -- Corresponds to 'cross' in the original program:
 -- > cross  = [: distance p line | p <- points :]
-calcCross :: Term Int                      -- Number of points
-          -> Array Int                     -- Segd
-          -> Array Double -> Array Double  -- Points
-          -> Array Double -> Array Double  -- Line starts
-          -> Array Double -> Array Double  -- Line ends
-          -> Array Double                  -- Relative distances from lines
+calcCross :: (IsNum a, IsOrd a, Elt a)
+          => Term Int            -- Number of points
+          -> Array Int           -- Segd
+          -> Array a -> Array a  -- Points
+          -> Array a -> Array a  -- Line starts
+          -> Array a -> Array a  -- Line ends
+          -> Array a             -- Relative distances from lines
 calcCross npts segd xs ys x1s y1s x2s y2s
   = zipWith6 distance xs
                       ys
@@ -64,10 +66,11 @@ calcCross npts segd xs ys x1s y1s x2s y2s
 --
 -- Not changed from the original source version thanks to vectavoid
 -- (except tuples are dissolved).
-distance :: Term Double -> Term Double -- Point
-         -> Term Double -> Term Double -- Line start
-         -> Term Double -> Term Double -- Line end
-         -> Term Double                -- Distance
+distance :: (IsNum a, IsOrd a, Elt a)
+         => Term a -> Term a  -- Point
+         -> Term a -> Term a  -- Line start
+         -> Term a -> Term a  -- Line end
+         -> Term a            -- Distance
 distance xo yo x1 y1 x2 y2
   = (x1 - xo) * (y2 - yo) - (y1 - yo) * (x2 - xo)
 
@@ -77,15 +80,16 @@ distance xo yo x1 y1 x2 y2
 --
 -- Corresponds to 'packed' in the original program:
 -- > packed = [: p | (p,c) <- zipP points cross, c D.> 0.0 :]
-calcAbove :: Term Int                      -- Number of points
-          -> Array Int                     -- Segd
-          -> Array Double -> Array Double  -- Points
-          -> Array Double                  -- Distances
-          -> (Array Double, Array Double,  -- Points with positive distances
-              Array Int                 )  -- New Segd
+calcAbove :: (IsNum a, IsOrd a, Elt a)
+          => Term Int            -- Number of points
+          -> Array Int           -- Segd
+          -> Array a -> Array a  -- Points
+          -> Array a             -- Distances
+          -> (Array a, Array a,  -- Points with positive distances
+              Array Int       )  -- New Segd
 calcAbove npts segd xs ys distances
   = let -- Compute emptySelctor for positive elements ((>0) -> 1; otherwise -> 0)
-        aboveTags  = zipWith (>.) distances (replicate npts 0.0)
+        aboveTags  = zipWith (>.) distances (replicate npts 0)
 
         -- Compute segd for just the positive elements
         aboveSegd = count_s true segd aboveTags
@@ -106,11 +110,12 @@ calcAbove npts segd xs ys distances
 --
 -- Corresponds to 'pm' in the original program:
 -- > pm = points !: maxIndexP cross
-calcFarthest :: Term Int                      -- Number of points
+calcFarthest :: (IsNum a, IsOrd a, Elt a)
+             => Term Int                      -- Number of points
              -> Array Int                     -- Segment descriptor
-             -> Array Double -> Array Double  -- Points
-             -> Array Double                  -- Distances
-             -> (Array Double, Array Double)  -- Points with biggest distances
+             -> Array a -> Array a  -- Points
+             -> Array a                  -- Distances
+             -> (Array a, Array a)  -- Points with biggest distances
 calcFarthest npts segd xs ys distances
   = let -- Index the distances array, and find the indices corresponding to the
         -- largest distance in each segment
@@ -144,5 +149,5 @@ maxSnd :: (Elt a, Elt b, IsOrd b) => Term (a, b) -> Term (a, b) -> Term (a, b)
 maxSnd ab1 ab2 = let b1 = snd ab1
                      b2 = snd ab2
                  in  if b1 >=. b2 then ab1
-                 	              else ab2
+                 	                else ab2
 {-# INLINE maxSnd #-}
