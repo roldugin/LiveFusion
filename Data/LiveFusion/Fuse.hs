@@ -313,40 +313,25 @@ packByBoolTagG uq tag tags_loop arr_loop = loop
   tagVar     = eltVar tags_uq
   aVar       = eltVar arr_uq
   bVar       = eltVar uq
-  ixVar      = indexVar uq   -- writing index
-
-  -- init
-  ixInit     = bindStmt ixVar (LitE (0::Int))  -- index initialization
-  init_stmts = [ixInit]
 
   -- body
   predExp    = fun1 (==. tag) tagVar
   guard      = guardStmt predExp bottom_
   bBind      = bindStmt bVar (VarE aVar)
-  body_stmts = [guard, bBind]
-
-  -- yield
-  ixUpdate   = incStmt ixVar
-  yield_stmts = [ixUpdate]
+  body_stmts = [bBind, guard]
 
   -- labels
-  init_      = initLbl uq
   body_      = bodyLbl uq
-  yield_     = yieldLbl uq
   bottom_    = bottomLbl uq
 
   -- THE loop
   loop       = setArrResultOnly uq
-             $ addStmts init_stmts  init_
              $ addStmts body_stmts  body_
-             $ addStmts yield_stmts yield_
              -- Note that we aren't reusing the rate since read/write indexes are not synchronised
-             $ freshRate       uq
              $ rebindLengthVar uq arr_uq
-             $ addDefaultSynonymLabels uq arr_uq
              $ setTheRate uq
-             $ addToSkipTests uq
-             $ addToSkipIncrs uq
+             -- Insert body_uq/yield_uq/bottom_uq which are at subrate
+             $ addSubrateBlocks uq
              -- Do not merge with the new rate, because we are filtering
              $ mergeLoops arr_uq [arr_loop, tags_loop]
 
