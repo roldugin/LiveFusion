@@ -222,7 +222,7 @@ extractWithDeps v = extract [v]
 rewriteStmtRates :: IntDisjointSet -> Stmt -> Stmt
 rewriteStmtRates rates = mapVars rw
   where
-    rw v@(IdVar prefix uq)
+    rw v@(Var prefix uq)
       | prefix == indexPrefix
       = indexVar (Rates.representative uq rates)
       | otherwise

@@ -6,8 +6,7 @@ import Data.LiveFusion.Loop.Common
 -------------------------------------------------------------------------------
 -- * General
 
-data Var = IdVar Name Id
-         | SimplVar Name
+data Var = Var Name Id
   deriving ( Eq, Ord )
 
 instance Show Var where
@@ -15,12 +14,15 @@ instance Show Var where
 
 
 var :: Name -> Id -> Var
-var = IdVar
+var = Var
 
 
 pprVar :: Var -> String
-pprVar (IdVar name ident) = pprName name ++ "_" ++ pprId ident
-pprVar (SimplVar name) = pprName name
+pprVar (Var name ident) = pprName name ++ "_" ++ pprId ident
+
+
+varId :: Var -> Id
+varId (Var _ i) = i
 
 
 -- Type classes for easier language tree traversal
@@ -43,7 +45,7 @@ lengthVar  = var lengthPrefix
 arrayVar   = var arrayPrefix
 
 resultVar :: Var
-resultVar  = SimplVar resultPrefix
+resultVar  = Var resultPrefix 0
 
 
 eltPrefix, indexPrefix, lengthPrefix, arrayPrefix, resultPrefix :: Name
@@ -52,3 +54,8 @@ indexPrefix   = "ix"
 lengthPrefix  = "len"
 arrayPrefix   = "arr"
 resultPrefix  = "result"
+
+
+isArrayVar :: Var -> Bool
+isArrayVar (Var nm _) = nm == arrayPrefix 
+isArrayVar _            = False
