@@ -113,6 +113,15 @@ data AST e where
            => Term a
            -> ScalarAST a
 
+  -- | For computing multiple results at the same time
+  Both     :: AST t1
+           -> AST t2
+           -> AST (t1,t2)
+
+
+-- | Shorthand for AST.Both constructor.
+(|*|) :: AST t1 -> AST t2 -> AST (t1,t2)
+(|*|) = Both
 
 
 -- | Traverse AST calling the given function for each node.

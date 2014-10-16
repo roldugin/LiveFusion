@@ -16,7 +16,7 @@ import Data.LiveFusion.HsBackend.Prelude
 
 import Prelude hiding ( map, filter, zipWith, zipWith3, zip, replicate, fst, snd )
 
-import Data.Vector.Unboxed as V ( toList, fromList, (!) )
+import Data.Vector.Unboxed as V ( Vector, toList, fromList, (!) )
 import GHC.Exts
 
 
@@ -128,6 +128,79 @@ toList = V.toList . evalArrayAST
 
 fromList :: Elt a => [a] -> Array a
 fromList = Manifest . V.fromList
+
+
+toVector :: Elt a => Array a -> V.Vector a
+toVector = evalArrayAST
+
+
+fromVector :: Elt a => V.Vector a -> Array a
+fromVector = Manifest
+
+
+fV :: Elt a => V.Vector a -> Array a
+fV = fromVector
+
+
+both :: (Elt a, Elt b)
+     => Array a
+     -> Array b
+     -> (Array a, Array b)
+both a b = (fV a', fV b')
+  where
+    (a',b') = evalAST
+      $ a |*| b
+
+
+three :: (Elt a, Elt b, Elt c)
+      => Array a
+      -> Array b
+      -> Array c
+      -> (Array a, Array b, Array c)
+three a b c = (fV a', fV b', fV c')
+  where
+    ((a',b'),c') = evalAST
+      $ a |*| b |*| c
+
+
+four :: (Elt a, Elt b, Elt c, Elt d)
+     => Array a
+     -> Array b
+     -> Array c
+     -> Array d
+     -> (Array a, Array b, Array c, Array d)
+four a b c d = (fV a', fV b', fV c', fV d')
+  where
+    (((a',b'),c'),d') = evalAST
+      $ a |*| b |*| c |*| d
+
+
+five :: (Elt a, Elt b, Elt c, Elt d, Elt e)
+     => Array a
+     -> Array b
+     -> Array c
+     -> Array d
+     -> Array e
+     -> (Array a, Array b, Array c, Array d, Array e)
+five a b c d e = (fV a', fV b', fV c', fV d', fV e')
+  where
+    ((((a',b'),c'),d'),e') = evalAST
+      $ a |*| b |*| c |*| d |*| e
+
+
+six :: (Elt a, Elt b, Elt c, Elt d, Elt e, Elt f)
+     => Array a
+     -> Array b
+     -> Array c
+     -> Array d
+     -> Array e
+     -> Array f
+     -> (Array a, Array b, Array c, Array d, Array e, Array f)
+six a b c d e f = (fV a', fV b', fV c', fV d', fV e', fV f')
+  where
+    (((((a',b'),c'),d'),e'),f') = evalAST
+      $ a |*| b |*| c |*| d |*| e |*| f
+
 
 
 -- | An instance for OverloadLists.
