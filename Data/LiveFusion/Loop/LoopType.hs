@@ -32,12 +32,8 @@ data Loop = Loop { -- | Loop entry block
                    -- | Global arguments and their values
                  , loopArgs         :: (Map Var Arg)
 
-                   -- | Resulting manifest array
-                 , loopArrResult    :: Maybe Id  -- May not be the best way to represent this,
-                                                 -- but currently the easiest.
-
-                   -- | Resulting scalar result
-                 , loopScalarResult :: Maybe Var
+                   -- | Array and scalar results
+                 , loopResults      :: [Var]                                                 -- but currently the easiest.
 
 
                    -- | The id of the loop whose @yield@ block produces the elements
@@ -71,17 +67,16 @@ instance Show Loop where
 
 pprLoop :: Loop -> String
 pprLoop loop
-  = "Loop Entry:    "  ++  maybe "None" pprLabel (loopEntry loop)                   ++\
-    "Loop Args:     "  ++  (show $ Map.keys $ loopArgs loop)                        ++\
-    "Array Result:  "  ++  maybe "None" (pprVar . arrayVar) (loopArrResult loop)    ++\
-    "Scalar Result: "  ++  maybe "None" pprVar              (loopScalarResult loop) ++\
-    "The rate:      "  ++  maybe "None" pprId               (loopTheRate loop)      ++\
-    "Rates:         "  ++  pprDisjointSet (loopRates loop)                          ++\
-    "Nesting:       "  ++  maybe "None" pprNest             (loopNest loop)         ++\
+  = "Loop Entry:    "  ++  maybe "None" pprLabel      (loopEntry     loop)  ++\
+    "Loop Args:     "  ++  show ( Map.keys            (loopArgs      loop))  ++\
+    "Loop Results:  "  ++  intercalateMap ", " pprVar (loopResults   loop)  ++\
+    "The rate:      "  ++  maybe "None" pprId         (loopTheRate   loop)  ++\
+    "Rates:         "  ++  pprDisjointSet             (loopRates     loop)  ++\
+    "Nesting:       "  ++  maybe "None" pprNest       (loopNest      loop)  ++\
     "Skip inserting:" ++\
-    "  Inits/Incrs: "  ++  show (loopSkipIncrs loop)                                ++\
-    "  Tests:       "  ++  show (loopSkipTests loop)                                ++\
-    "BlockMap:      "  ++\ pprBlockMap (loopBlockMap loop)
+    "  Inits/Incrs: "  ++  show                       (loopSkipIncrs loop)  ++\
+    "  Tests:       "  ++  show                       (loopSkipTests loop)  ++\
+    "BlockMap:      "  ++\ pprBlockMap                (loopBlockMap  loop)
   where
     pprNest (s,d) = "(segd " ++ pprId s ++ ", data " ++ pprId d ++ ")"
 
@@ -94,8 +89,7 @@ instance Monoid Loop where
   mempty
     = Loop { loopEntry        = Nothing
            , loopArgs         = Map.empty
-           , loopArrResult    = Nothing
-           , loopScalarResult = Nothing
+           , loopResults      = []
            , loopTheRate      = Nothing
            , loopRates        = Rates.empty
            , loopNest         = Nothing
@@ -106,8 +100,7 @@ instance Monoid Loop where
   mappend loop1 loop2
     = Loop { loopEntry        = loopEntry     `joinWith` (<|>)
            , loopArgs         = loopArgs      `joinWith` Map.union
-           , loopArrResult    = Nothing
-           , loopScalarResult = Nothing
+           , loopResults      = loopResults   `joinWith` (++)
            , loopTheRate      = loopTheRate   `joinWith` (<|>)
            , loopRates        = loopRates     `joinWith` Rates.merge
            , loopNest         = loopNest      `joinWith` (<|>)
@@ -304,34 +297,16 @@ getNesting = loopNest
 -------------------------------------------------------------------------------
 -- * Scalar and Array results manipulation
 
-setArrResultImpl :: Maybe Id -> Loop -> Loop
-setArrResultImpl mbId loop = loop { loopArrResult = mbId }
+setArrayResult :: Unique -> Loop -> Loop
+setArrayResult uq = setResult (arrayVar uq)
 
 
-setArrResult :: Id -> Loop -> Loop
-setArrResult i = setArrResultImpl (Just i)
+setResult :: Var -> Loop -> Loop
+setResult v loop = loop { loopResults = [v] }
 
 
-unsetArrResult :: Loop -> Loop
-unsetArrResult = setArrResultImpl Nothing
-
-
-setScalarResultImpl :: Maybe Var -> Loop -> Loop
-setScalarResultImpl mbVar loop = loop { loopScalarResult = mbVar }
-
-
-setScalarResult :: Var -> Loop -> Loop
-setScalarResult v = setScalarResultImpl (Just v)
-
-
-unsetScalarResult :: Loop -> Loop
-unsetScalarResult = setScalarResultImpl Nothing
-
-
--- | Unsets scalar result along the way.
-setArrResultOnly :: Id -> Loop -> Loop
-setArrResultOnly i = unsetScalarResult
-                   . setArrResult i
+setResults :: [Var] -> Loop -> Loop
+setResults vs loop = loop { loopResults = vs }
 
 
 

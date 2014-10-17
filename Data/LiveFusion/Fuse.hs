@@ -155,7 +155,7 @@ manifestG uq vec = loop
   body_      = bodyLbl uq
 
   -- THE loop
-  loop       = setArrResultOnly uq
+  loop       = setArrayResult uq
   	         $ addArg   arrVar (toDyn vec)
              $ addStmts init_stmts init_
              $ addStmts body_stmts body_
@@ -179,7 +179,7 @@ mapG uq f arr_loop = loop
 
   -- THE loop
   loop       = setTheRate uq
-  	         $ setArrResultOnly uq
+  	         $ setArrayResult uq
              $ addStmts body_stmts body_
              $ reuseRate                uq arr_uq
              $ rebindLengthVar          uq arr_uq
@@ -206,7 +206,7 @@ zipWithG uq f arr_loop brr_loop = loop
   body_      = bodyLbl uq
 
   -- THE loop
-  loop       = setArrResultOnly uq
+  loop       = setArrayResult uq
              $ addStmts body_stmts body_
              $ rebindLengthVar uq arr_uq -- be careful: arbitrary choice between a and b
              $ setTheRate uq
@@ -230,7 +230,7 @@ zipWith6G uq f al bl cl dl el fl = loop
   body_      = bodyLbl uq
 
   -- THE loop
-  loop       = setArrResultOnly uq
+  loop       = setArrayResult uq
              $ addStmts body_stmts body_
              $ rebindLengthVar uq a_uq -- be careferul!
              $ setTheRate uq
@@ -257,7 +257,7 @@ filterG uq p arr_loop = loop
   bottom_sub = bottomLbl uq
 
   -- THE loop
-  loop       = setArrResultOnly uq
+  loop       = setArrayResult uq
              $ addStmts body_stmts  body_sub
              $ rebindLengthVar uq arr_uq
              $ addSubrateBlocks uq
@@ -293,8 +293,7 @@ scanG uq f z arr_loop = loop
 
   -- THE loop
   loop       = setTheRate uq
-  	         $ setArrResult uq
-  	         $ setScalarResult accVar
+  	         $ setArrayResult uq
   	         $ addStmts init_stmts init_
              $ addStmts body_stmts body_
              $ addStmts bottom_stmts bottom_
@@ -325,7 +324,7 @@ packByBoolTagG uq tag tags_loop arr_loop = loop
   bottom_    = bottomLbl uq
 
   -- THE loop
-  loop       = setArrResultOnly uq
+  loop       = setArrayResult uq
              $ addStmts body_stmts  body_
              -- Note that we aren't reusing the rate since read/write indexes are not synchronised
              $ rebindLengthVar uq arr_uq
@@ -370,8 +369,7 @@ fold_sG uq f z segd_loop data_loop = loop
 
   -- THE loop
   loop      = setTheRate uq
-            $ setArrResult uq
-            $ setScalarResult accVar
+            $ setArrayResult uq
             -- Segd (segd_uq) stuff below
             $ addStmts init_segd_stmts init_segd
             $ addStmts nest_segd_stmts nest_segd
@@ -422,8 +420,7 @@ scan_sG uq f z segd_loop data_loop = loop
   bottom_data = bottomLbl data_uq
 
   -- THE loop
-  loop      = setArrResult uq
-            $ setScalarResult accVar
+  loop      = setArrayResult uq
             -- Segd (segd_uq) stuff below
             $ addStmts init_segd_stmts init_segd
             $ addStmts nest_segd_stmts nest_segd
@@ -468,7 +465,7 @@ replicate_sG uq len segd_loop elts_loop = loop
   body_result = bodyLbl result_uq
 
   -- THE loop
-  loop      = setArrResultOnly uq
+  loop      = setArrayResult uq
             $ addStmts init_result_stmts init_result
             $ addStmts body_result_stmts body_result
             -- aVar needs to be created before going into inner loop
@@ -513,7 +510,7 @@ indices_sG uq len segd_loop = loop
   nest_segd     = nestLbl segd_uq
 
   -- THE loop
-  loop      = setArrResultOnly uq
+  loop      = setArrayResult uq
             $ addStmts init_result_stmts init_result
             $ addStmts bottom_result_stmts bottom_result
             $ addStmts nest_segd_stmts nest_segd
@@ -545,7 +542,7 @@ replicateG uq n x = loop
   body_ = bodyLbl uq
 
   -- THE loop
-  loop      = setArrResultOnly uq
+  loop      = setArrayResult uq
             $ addStmts init_stmts init_
             $ addStmts body_stmts body_
             $ producerLoop uq
@@ -569,7 +566,7 @@ bpermuteG uq arr_loop ixs_loop = loop
   body_      = bodyLbl uq
 
   -- THE loop
-  loop       = setArrResultOnly uq
+  loop       = setArrayResult uq
   	         $ addStmts body_stmts body_
              $ setTheRate uq
              -- Arr has random access rate. No rate really.

@@ -16,13 +16,15 @@ import Data.Maybe
 import Data.Set ( Set )
 import qualified Data.Set as Set
 
+import Prelude as P
+
 
 data Stmt = Bind   Var Expr
           | Assign Var Expr
           | Case   Expr Label Label
           | Guard  Expr Label
           | Goto   Label
-          | Return Expr
+          | Return [Var]
           -- Array statements.
           -- They are here because some of them are stateful operations
           -- and they are backend specific.
@@ -63,7 +65,7 @@ instance VarContainer Stmt where
     go (Case e l1 l2) = Case (mapVars f e) l1 l2
     go (Guard e l) = Guard (mapVars f e) l
     go (Goto l) = Goto l
-    go (Return e) = Return (mapVars f e)
+    go (Return vs) = Return (P.map f vs)
     go (NewArray v e) = NewArray (f v) (mapVars f e)
     go (ReadArray v1 v2 e) = ReadArray (f v1) (f v2) (mapVars f e)
     go (WriteArray v ei ex) = WriteArray (f v) (mapVars f ei) (mapVars f ex)
@@ -87,7 +89,7 @@ instance Analyse Stmt where
     go (Case e _ _) = references e
     go (Guard e _)  = references e
     go (Goto _)     = []
-    go (Return e)   = references e
+    go (Return vs)  = vs
 
     go (NewArray _ e)       = references e
     go (ReadArray _ v e)    = v : references e
@@ -186,7 +188,7 @@ pprStmt (ReadArray x arr i)     = "let" +-+ pprVar x +-+ "= readArray" +-+ pprVa
 pprStmt (WriteArray arr i x)    = "writeArray" +-+ pprVar arr +-+ pprExpr i +-+ pprExpr x
 pprStmt (ArrayLength i arr)     = "let" +-+ pprVar i +-+ "= arrayLength" +-+ pprVar arr
 pprStmt (SliceArray arr' arr n) = "let" +-+ pprVar arr' +-+ "= sliceArray" +-+ pprVar arr +-+ pprExpr n
-pprStmt (Return e)     = "return" +-+ pprExpr e
+pprStmt (Return vs)    = "return" +-+ (paren $ intercalateMap ", " pprVar vs)
 
 
 

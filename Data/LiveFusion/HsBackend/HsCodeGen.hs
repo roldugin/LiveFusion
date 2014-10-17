@@ -148,10 +148,12 @@ cgStmt _ _ (SliceArray arr' arr n)
         n_th   = cgExp n
     in  thStmt
 
-cgStmt _ _ (Return v)
-  = let thStmt   = NoBindS $ TH.AppE returnFn v_th
+cgStmt _ _ (Return vs)
+  = let thStmt   = NoBindS $ TH.AppE returnFn vs_th
         returnFn = TH.VarE $ mkName "return"
-        v_th     = cgExp v
+        vs_th    = foldl1 pairE       -- (((var1,var2),var3),var4)
+                 $ map cgVar vs
+        pairE x y = TH.TupE [x,y]
     in  thStmt
 
 
@@ -208,7 +210,7 @@ cgDeBruijn = cg (-1)
   where
     cg :: Int -> DeBruijn.Term env t -> TH.Exp
     {-# NOINLINE cg #-}
-    cg lvl (Var ix)
+    cg lvl (DeBruijn.Var ix)
       = TH.VarE $ thName lvl ix
 
     cg lvl (CodeT code)

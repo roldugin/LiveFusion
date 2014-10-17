@@ -112,7 +112,7 @@ blockEnv blk = postproc
     analyse (WriteArray arr i x)    = assume arr >>> assumeAllIn i >>> assumeAllIn x
     analyse (ArrayLength x arr)     = assume arr >>> declare x
     analyse (SliceArray arr' arr n) = assume arr >>> assumeAllIn n >>> declare arr'
-    analyse (Return v)     = assumeAllIn v
+    analyse (Return vs)    = assumeMany vs
 
     assumeAllIn = assumeMany . varsE
 

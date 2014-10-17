@@ -24,17 +24,13 @@ import Control.Arrow ( (>>>) )
 
 -- | Reduces the minimal set of labels
 postprocessLoop :: Loop -> Loop
-postprocessLoop loop = rewriteLoopLabelsAndRates
-                     $ reorderDecls
-                     $ removeClashingStmts
-                     $ writeResultArray uq
-                     $ maybeNestLoops
-                     $ insertTests
-                     $ insertIncrs
-                     $ loop
-  where
-    uq  = fromMaybe err (loopArrResult loop)
-    err = error "postprocessLoop: No array result set"
+postprocessLoop = rewriteLoopLabelsAndRates
+                . reorderDecls
+                . removeClashingStmts
+                . processResults
+                . maybeNestLoops
+                . insertTests
+                . insertIncrs
 
 
 insertTests :: Loop -> Loop
@@ -92,13 +88,35 @@ rewriteLoopLabelsAndRates loop
     newBlockMap = AMap.map (rewriteBlockLabelsAndRates lbls rates) (loopBlockMap loop)
 
 
+processResults :: Loop -> Loop
+processResults = insertReturns
+               . insertArrayWrites
+
+
+insertReturns :: Loop -> Loop
+insertReturns loop = addStmt ret done_ loop
+ where
+  uq    = getJustRate loop
+  done_ = doneLbl uq  
+  ret   = returnStmt $ loopResults loop
+
+
+insertArrayWrites :: Loop -> Loop
+insertArrayWrites loop = foldl write loop
+                       $ map varId
+                       $ filter isArrayVar
+                       $ loopResults loop
+ where
+  write = flip writeResultArray
+
+
+
 writeResultArray :: Unique -> Loop -> Loop
 writeResultArray uq loop = process loop
  where
   alloc   = newArrStmt arr (varE bound)
   write   = writeArrStmt arr (varE ix) (varE elt)
   slice   = sliceArrStmt resultVar arr (varE ix)
-  ret     = returnStmt (varE resultVar)
 
   arr     = arrayVar  uq
   bound   = lengthVar uq
@@ -108,7 +126,6 @@ writeResultArray uq loop = process loop
   process = addStmt alloc (initLbl uq)
         >>> addStmt write (yieldLbl uq)
         >>> addStmt slice (doneLbl uq)
-        >>> addStmt ret   (doneLbl uq)
 
 
 -- | Inserts statements allowing the nesting to happen
