@@ -6,12 +6,12 @@ module QuickHull where
 
 import Data.LiveFusion as LF
 
-import Prelude as P hiding ( map, replicate, zip, zipWith, filter, fst, snd )
+import Prelude as P hiding ( map, replicate, zip, zipWith, filter, fst, snd, unzip )
 
-
+import Debug.Trace
 
 farAndAbove :: (IsNum a, IsOrd a, Elt a)
-            => Term Int            -- Number of lines
+            => Term Int            -- Number of points
             -> Array Int           -- Segd
             -> Array a -> Array a  -- Points
             -> Array a -> Array a  -- Line starts
@@ -28,7 +28,7 @@ farAndAbove npts segd xs ys x1s y1s x2s y2s
 
         -- Find points farthest from each line.
         (fars_xs, fars_ys) = calcFarthest npts segd xs ys distances
-    in  (fars_xs, fars_ys, above_xs, above_ys, aboveSegd)
+    in  traceShow (getLoop $ fars_xs |*| fars_ys |*| above_xs |*| above_ys |*| aboveSegd) $ five fars_xs fars_ys above_xs above_ys aboveSegd
 
 
 
@@ -95,9 +95,11 @@ calcAbove npts segd xs ys distances
         aboveSegd = count_s true segd aboveTags
 
         -- Get the actual points corresponding to positive elements
-        above_xs  = packByBoolTag true aboveTags xs
-        above_ys  = packByBoolTag true aboveTags ys
-
+        (above_xs, above_ys)
+                  = unzip
+                  $ packByBoolTag true aboveTags
+                  $ zip xs ys
+ 
     in  (above_xs, above_ys, aboveSegd)
 {-# INLINE calcAbove #-}
 
@@ -111,10 +113,10 @@ calcAbove npts segd xs ys distances
 -- Corresponds to 'pm' in the original program:
 -- > pm = points !: maxIndexP cross
 calcFarthest :: (IsNum a, IsOrd a, Elt a)
-             => Term Int                      -- Number of points
-             -> Array Int                     -- Segment descriptor
+             => Term Int            -- Number of points
+             -> Array Int           -- Segment descriptor
              -> Array a -> Array a  -- Points
-             -> Array a                  -- Distances
+             -> Array a             -- Distances
              -> (Array a, Array a)  -- Points with biggest distances
 calcFarthest npts segd xs ys distances
   = let -- Index the distances array, and find the indices corresponding to the
