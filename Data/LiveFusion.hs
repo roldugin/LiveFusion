@@ -5,6 +5,7 @@ module Data.LiveFusion
   , module Data.LiveFusion.Scalar.HOAS
   , module Data.LiveFusion.HsBackend.Prelude
   , module Data.LiveFusion.Evaluator
+  , (|*|)
   ) where
 
 import Data.LiveFusion.AST
@@ -114,16 +115,16 @@ indices_s len segd = Indices_s len segd
 -- Otherwise the array will be recomputed for every lookup.
 (!) :: Elt a => Array a -> Int -> a
 arr ! ix
-  = let vec = evalArrayAST arr
+  = let vec = evalAST arr
     in vec V.! ix
 
 
 force :: Elt a => Array a -> Array a
-force = Manifest . evalArrayAST
+force = Manifest . evalAST
 
 
 toList :: Elt a => Array a -> [a]
-toList = V.toList . evalArrayAST
+toList = V.toList . evalAST
 
 
 fromList :: Elt a => [a] -> Array a
@@ -131,7 +132,7 @@ fromList = Manifest . V.fromList
 
 
 toVector :: Elt a => Array a -> V.Vector a
-toVector = evalArrayAST
+toVector = evalAST
 
 
 fromVector :: Elt a => V.Vector a -> Array a

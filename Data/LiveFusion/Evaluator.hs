@@ -54,16 +54,9 @@ instance (Typeable e, Show e) => Show (AST e) where
   show = show . evalAST
 
 
--- | Evaluates an array AST to a vector.
-evalArrayAST :: Elt a => ArrayAST a -> V.Vector a
-evalArrayAST (Manifest vec) = vec
-evalArrayAST op = evalAST op
-
-
 -- | Evaluates the AST to a final value.
---
--- Currently only Vectors. See @evalArrayAST@
 evalAST :: Typeable a => AST a -> a
+evalAST (Manifest vec) = vec
 evalAST ast = result
   where
     loop = getLoop ast
