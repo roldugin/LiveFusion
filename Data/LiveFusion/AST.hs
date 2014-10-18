@@ -15,7 +15,7 @@ type ArrayAST a = AST (V.Vector a)
 
 
 -- | Abstract Syntax Tree whose nodes represent delayed collective array operations.
-data AST e where
+data AST t where
   Map      :: (Elt a, Elt b)
            => (Term a -> Term b)
            -> ArrayAST a
@@ -157,7 +157,7 @@ rebaseManifest' (Manifest vec) = Manifest' vec
 rebaseManifest' ast = trav rebaseManifest' ast
 
 
-showAST :: AST e -> String
+showAST :: AST t -> String
 showAST (Map _ arr) = "Map (" ++ (showAST arr) ++ ")"
 showAST (Filter _ arr) = "Filter (" ++ (showAST arr) ++ ")"
 showAST (ZipWith _ arr brr) = "ZipWith (" ++ (showAST arr) ++ ") (" ++ (showAST brr) ++ ")"

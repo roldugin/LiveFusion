@@ -17,7 +17,7 @@ import qualified Data.Vector.Unboxed as V
 
 -- Required for getting data-reify to work with GADTs
 data WrappedASG s where
-  Wrap :: Typeable e => ASG e s -> WrappedASG s
+  Wrap :: Typeable t => ASG t s -> WrappedASG s
 
 
 deriving instance Show (WrappedASG Unique)
@@ -37,7 +37,7 @@ type ArrayASG a s = ASG (V.Vector a) s
 --   * Replacing every point of recursion with a uniquely named variable
 --   * Eliminating common subexpressions and representing them as one node, reference by
 --     variables of the same name.
-data ASG e s where
+data ASG t s where
   MapG      :: (Elt a, Elt b)
             => (Term a -> Term b)
             -> ArrayASG a s
@@ -134,23 +134,23 @@ data ASG e s where
             -> ASG t2 s
             -> ASG (t1,t2) s
 
-  VarG      :: Typeable e
+  VarG      :: Typeable t
             => s
-            -> ASG e s
+            -> ASG t s
 
 
-deriving instance Show s => Show (ASG e s)
+deriving instance Show s => Show (ASG t s)
 deriving instance Typeable ASG
 
 
-instance Typeable e => MuRef (AST e) where
-  type DeRef (AST e) = WrappedASG
-  mapDeRef ap e = Wrap <$> mapDeRef' ap e
+instance Typeable t => MuRef (AST t) where
+  type DeRef (AST t) = WrappedASG
+  mapDeRef ap t = Wrap <$> mapDeRef' ap t
     where
       mapDeRef' :: Applicative ap
                 => (forall b. (MuRef b, WrappedASG ~ DeRef b) => b -> ap u)
-                -> AST e
-                -> ap (ASG e u)
+                -> AST t
+                -> ap (ASG t u)
 
       mapDeRef' ap (Map f arr)
         = MapG f
@@ -234,13 +234,13 @@ instance Typeable e => MuRef (AST e) where
           <*> (VarG <$> ap ast2)
 
 
-getASTNode :: Typeable e => Map Unique (WrappedASG Unique) -> Unique -> Maybe (ASG e Unique)
-getASTNode m n = case m ! n of Wrap  e -> cast e
+getASTNode :: Typeable t => Map Unique (WrappedASG Unique) -> Unique -> Maybe (ASG t Unique)
+getASTNode m n = case m ! n of Wrap t -> cast t
 
 
-recoverSharing :: Typeable e => AST e -> IO (Map Unique (WrappedASG Unique), Unique, Maybe (ASG e Unique))
-recoverSharing e = do
-  Graph l n <- reifyGraph e
+recoverSharing :: Typeable t => AST t -> IO (Map Unique (WrappedASG Unique), Unique, Maybe (ASG t Unique))
+recoverSharing t = do
+  Graph l n <- reifyGraph t
   let m = Map.fromList l
   return (m, n, getASTNode m n)
 {-# NOINLINE recoverSharing #-}
