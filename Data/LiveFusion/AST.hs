@@ -114,19 +114,21 @@ data AST e where
            -> ScalarAST a
 
   -- | For computing multiple results at the same time
-  Both     :: AST t1
+  Both     :: (Typeable t1, Typeable t2)
+           => AST t1
            -> AST t2
            -> AST (t1,t2)
 
 
 -- | Shorthand for AST.Both constructor.
-(|*|) :: AST t1 -> AST t2 -> AST (t1,t2)
+(|*|) :: (Typeable t1, Typeable t2)
+      => AST t1 -> AST t2 -> AST (t1,t2)
 (|*|) = Both
 
 
 -- | Traverse AST calling the given function for each node.
 --
--- You probably want this the two functions to be mutually recursive.
+-- You probably want the two functions to be mutually recursive.
 trav :: (forall t1 . AST t1 -> AST t1)
      -> AST t -> AST t
 trav ap = go

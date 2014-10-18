@@ -38,14 +38,12 @@ class Analyse construct where
 -------------------------------------------------------------------------------
 -- * Loop specific
 
-eltVar, indexVar, lengthVar, arrayVar :: Id -> Var
+eltVar, indexVar, lengthVar, arrayVar, resultVar :: Id -> Var
 eltVar     = var eltPrefix
 indexVar   = var indexPrefix
 lengthVar  = var lengthPrefix
 arrayVar   = var arrayPrefix
-
-resultVar :: Var
-resultVar  = Var resultPrefix 0
+resultVar  = var resultPrefix
 
 
 eltPrefix, indexPrefix, lengthPrefix, arrayPrefix, resultPrefix :: Name

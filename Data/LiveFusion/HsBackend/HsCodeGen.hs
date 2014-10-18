@@ -296,7 +296,8 @@ pluginEntryCodeTH entryFnName loop resultTy
                    $ map (coerceArgE . TH.VarE . cgVarName) argVars
 
 
-    -- Make statically typed entry into the plugin like entry :: Vector Double -> Vector Int -> Vector Double
+    -- Make statically typed entry into the plugin like, e.g.:
+    -- entry :: Vector Double -> Vector Int -> ((Vector Double, Int), Vector Int)
     tyEntrySig     = SigD tyEntryName tyEntryTy
     tyEntryDec     = FunD tyEntryName [Clause argPats (NormalB loopCall) []]
 

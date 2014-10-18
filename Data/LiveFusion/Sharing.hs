@@ -129,6 +129,11 @@ data ASG e s where
             -> ArrayASG Int s
             -> ArrayASG Int s
 
+  BothG     :: (Typeable t1, Typeable t2)
+            => ASG t1 s
+            -> ASG t2 s
+            -> ASG (t1,t2) s
+
   VarG      :: Typeable e
             => s
             -> ASG e s
@@ -222,6 +227,11 @@ instance Typeable e => MuRef (AST e) where
 
       mapDeRef' ap (Scalar x)
         = pure $ ScalarG x
+
+      mapDeRef' ap (Both ast1 ast2)
+        = BothG
+          <$> (VarG <$> ap ast1)
+          <*> (VarG <$> ap ast2)
 
 
 getASTNode :: Typeable e => Map Unique (WrappedASG Unique) -> Unique -> Maybe (ASG e Unique)

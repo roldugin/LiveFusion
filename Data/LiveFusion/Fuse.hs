@@ -35,6 +35,13 @@ fuse env node uq = fuse' node uq
     what     = lc "Manifest" uq
 
 
+  fuse' (BothG a b) uq = what $ bothG uq a_loop b_loop
+   where
+    a_loop   = fuse' a uq
+    b_loop   = fuse' b uq
+    what     = lc "Both" uq
+
+
   fuse' (MapG f arr) uq = what $ mapG uq f arr_loop
    where
     arr_loop = fuse' arr uq  -- TODO: this uq means nothing
@@ -120,6 +127,7 @@ fuse env node uq = fuse' node uq
     what      = lc "Indices_s" uq
 
 
+
   -- | We store scalars in AST/ASG however, we're not yet clever about computing them.
   --   For not we assume that any scalar AST could only be constructed using Scalar constructor
   getScalar :: (Typeable e, Elt e) => (ASG e Unique) -> Unique -> Term e
@@ -160,6 +168,9 @@ manifestG uq vec = loop
              $ addStmts init_stmts init_
              $ addStmts body_stmts body_
              $ producerLoop uq
+
+
+bothG uq a_loop b_loop = mergeLoops uq [a_loop, b_loop]
 
 
 mapG uq f arr_loop = loop

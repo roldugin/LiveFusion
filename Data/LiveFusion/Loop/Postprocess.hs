@@ -90,6 +90,7 @@ rewriteLoopLabelsAndRates loop
 
 processResults :: Loop -> Loop
 processResults = insertReturns
+            -- . insertResultRebinds -- TODO: result_7 = acc_7
                . insertArrayWrites
 
 
@@ -97,8 +98,10 @@ insertReturns :: Loop -> Loop
 insertReturns loop = addStmt ret done_ loop
  where
   uq    = getJustRate loop
-  done_ = doneLbl uq  
-  ret   = returnStmt $ loopResults loop
+  done_ = doneLbl uq
+  ret   = returnStmt
+        $ map (resultVar . varId) -- rewrite vars as result_uq, e.g.
+        $ loopResults loop        -- [arr_1, acc_3, arr_5] -> [result_1, result_3, result_5]
 
 
 insertArrayWrites :: Loop -> Loop
@@ -110,13 +113,12 @@ insertArrayWrites loop = foldl write loop
   write = flip writeResultArray
 
 
-
 writeResultArray :: Unique -> Loop -> Loop
 writeResultArray uq loop = process loop
  where
   alloc   = newArrStmt arr (varE bound)
   write   = writeArrStmt arr (varE ix) (varE elt)
-  slice   = sliceArrStmt resultVar arr (varE ix)
+  slice   = sliceArrStmt (resultVar uq) arr (varE ix)
 
   arr     = arrayVar  uq
   bound   = lengthVar uq
