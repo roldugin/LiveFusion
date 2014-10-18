@@ -257,12 +257,19 @@ rewriteStmtLabels lbls = mapLabels rw
 
 -- | Two statement are considered to be clashing if they bind the same variable.
 clash :: Stmt -> Stmt -> Bool
-clash s1 s2 = fromMaybe False clash'
-  where
-    clash' = do 
-               v1 <- bindsMb s1
-               v2 <- bindsMb s2
-               return (v1 == v2)
+clash (Bind v1 _) (Bind v2 _) = v1 == v2
+clash (Assign v1 _) (Assign v2 _) = v1 == v2
+clash (Case p1 t1 f1) (Case p2 t2 f2) = (p1 ==? p1) && (t1 == t2) && (f1 == f2)
+clash (Guard p1 l1) (Guard p2 l2) = (p1 ==? p2) && (l1 == l2)
+clash (Goto l1) (Goto l2) = l1 == l2
+clash (Return _) (Return _) = True  -- perhaps this could be relaxed
+clash (NewArray v1 _) (NewArray v2 _) = v1 == v2
+clash (ReadArray v1 _ _) (ReadArray v2 _ _) = v1 == v2
+clash (WriteArray v1 _ _) (WriteArray v2 _ _) = v1 == v2
+clash (ArrayLength v1 _) (ArrayLength v2 _) = v1 == v2
+clash (SliceArray v1 _ _) (SliceArray v2 _ _) = v1 == v2
+clash _ _ = False -- Although two expressions binding the same variable should technically clash.
+
 
 
 -------------------------------------------------------------------------------

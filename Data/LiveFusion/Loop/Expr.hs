@@ -85,6 +85,19 @@ pprExpr (LitE i)
   = show i
 
 
+-- | TODO This is a very temporary solution for determining
+--        whether two expressions are equal.
+--
+--   It only looks at things like contraints and variables but
+--   doesn't look inside HOAS terms (since we can't yet compare Impls).
+--
+--   A quick and ugly fix is to use unsafePerformIO to compare Impl.th.
+(==?) :: Expr -> Expr -> Bool
+(VarE v1) ==? (VarE v2) = v1 == v2
+(AppE f1 x1) ==? (AppE f2 x2) = (f1 ==? f2) && (x1 ==? x2)
+(TermE _) ==? (TermE _) = True                -- Ugly but temporary
+(LitE e1) ==? (LitE e2) = show e1 == show e2  -- Even uglier, problematic in untyped exps
+
 -------------------------------------------------------------------------------
 -- * Dealing with Terms
 
