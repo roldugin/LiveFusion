@@ -172,7 +172,7 @@ manifestG uq vec = loop
              $ producerLoop uq
 
 
-bothG uq a_loop b_loop = mergeLoops uq [a_loop, b_loop]
+bothG uq a_loop b_loop = Loop.append a_loop b_loop
 
 
 mapG uq f arr_loop = loop
@@ -245,7 +245,7 @@ zipWith6G uq f al bl cl dl el fl = loop
   -- THE loop
   loop       = setArrayResult uq
              $ addStmts body_stmts body_
-             $ rebindLengthVar uq a_uq -- be careferul!
+             $ rebindLengthVar uq a_uq -- be careful!
              $ setTheRate uq
              $ afrr_loop
 
