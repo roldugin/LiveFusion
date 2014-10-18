@@ -115,15 +115,17 @@ fuse env node uq = fuse' node uq
     what      = lc "Scan_s" uq
 
 
-  fuse' (Replicate_sG len segd dat) uq = what $ replicate_sG uq len segd_loop data_loop
+  fuse' (Replicate_sG len segd dat) uq = what $ replicate_sG uq len' segd_loop data_loop
    where
     data_loop = fuse' dat uq
     segd_loop = fuse' segd uq
+    len'      = HOAS.intp len
     what      = lc "Replicate_s" uq
 
-  fuse' (Indices_sG len segd) uq = what $ indices_sG uq len segd_loop
+  fuse' (Indices_sG len segd) uq = what $ indices_sG uq len' segd_loop
    where
     segd_loop = fuse' segd uq
+    len'      = HOAS.intp len
     what      = lc "Indices_s" uq
 
 
@@ -457,10 +459,7 @@ replicate_sG uq len segd_loop elts_loop = loop
   elts_uq   = getJustRate elts_loop
   result_uq = getJustRate result_loop
 
-  -- init_result
-  resLenVar = lengthVar result_uq    
-  resLenBind= bindStmt resLenVar (TermE len)
-  init_result_stmts = [resLenBind]
+  lenHintVar= lengthVar result_uq    
 
   -- body_result
   -- TODO: Check if optimised away. If not, move to body_source.
@@ -477,7 +476,7 @@ replicate_sG uq len segd_loop elts_loop = loop
 
   -- THE loop
   loop      = setArrayResult uq
-            $ addStmts init_result_stmts init_result
+            $ addArg   lenHintVar (toDyn len)
             $ addStmts body_result_stmts body_result
             -- aVar needs to be created before going into inner loop
             $ moveWithDeps aVar body_segd nest_segd
@@ -501,11 +500,7 @@ indices_sG uq len segd_loop = loop
   result_uq = getJustRate result_loop
 
   bVar      = eltVar result_uq  -- result array variable
-
-  -- init_result
-  resLenVar = lengthVar result_uq    
-  resLenBind= bindStmt resLenVar (TermE len)
-  init_result_stmts = [resLenBind]
+  lenHintVar= lengthVar result_uq    
 
   -- nest_segd (reset index counter)
   bReset    = bindStmt bVar zeroE
@@ -522,7 +517,7 @@ indices_sG uq len segd_loop = loop
 
   -- THE loop
   loop      = setArrayResult uq
-            $ addStmts init_result_stmts init_result
+            $ addArg   lenHintVar (toDyn len)
             $ addStmts bottom_result_stmts bottom_result
             $ addStmts nest_segd_stmts nest_segd
             $ nested_loops
