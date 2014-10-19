@@ -80,8 +80,9 @@ fuse env node uq = fuse' node uq
     what     = lc "Scan" uq
 
 
-  fuse' (ReplicateG n x) uq = what $ replicateG uq n x
+  fuse' (ReplicateG n x) uq = what $ replicateG uq n' x
    where
+    n'       = HOAS.intp n
     what     = lc "Replicate" uq
 
 
@@ -533,10 +534,7 @@ indices_sG uq len segd_loop = loop
 
 replicateG uq n x = loop
  where
-  -- init_result
   lenVar     = lengthVar uq    
-  lenBind    = bindStmt lenVar (TermE n)
-  init_stmts = [lenBind]
 
   -- body_result
   xVar       = eltVar uq
@@ -549,7 +547,7 @@ replicateG uq n x = loop
 
   -- THE loop
   loop      = setArrayResult uq
-            $ addStmts init_stmts init_
+            $ addArg   lenVar     (toDyn n)
             $ addStmts body_stmts body_
             $ producerLoop uq
 
