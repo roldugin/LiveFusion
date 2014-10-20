@@ -21,3 +21,12 @@ Executable quickhull-lf
                   Timing Points2D.Types SVG
   hs-source-dirs: QuickHull/lf QuickHull/lib
   ghc-options:    -eventlog -rtsopts -threaded -fllvm -optlo-O3 -Odph -fcpr-off -fsimpl-tick-factor=1000
+
+Executable quickhull-sf
+  Build-depends:  base, vector, random, old-time, containers, dph-base, dph-prim-par, dph-lifted-copy, ghc-prim, primitive
+  Main-is:        Main.hs
+  other-modules:  Handvec
+                  HandvecWrp
+                  Timing Points2D.Types SVG
+  hs-source-dirs: QuickHull/sf QuickHull/lib
+  ghc-options:    -eventlog -rtsopts -threaded -fllvm -optlo-O3 -Odph -fcpr-off -fsimpl-tick-factor=1000
