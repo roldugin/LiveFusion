@@ -39,7 +39,7 @@ uc = unsafeCoerce
 ucText = "unsafeCoerce"
 
 
-fuseToLoop :: Typeable e => AST e -> IO Loop
+fuseToLoop :: Typeable t => AST t -> IO Loop
 fuseToLoop ast = do
   (env, rootUq, Just rootNode) <- recoverSharing ast
   let loop = fuse env rootNode rootUq
@@ -50,12 +50,12 @@ resultType :: t a -> a
 resultType _ = undefined
 
 
-instance (Typeable e, Show e) => Show (AST e) where
+instance (Typeable t, Show t) => Show (AST t) where
   show = show . evalAST
 
 
 -- | Evaluates the AST to a final value.
-evalAST :: Typeable a => AST a -> a
+evalAST :: Typeable t => AST t -> t
 evalAST (Manifest vec) = vec
 evalAST ast = result
   where
@@ -65,19 +65,24 @@ evalAST ast = result
 {-# NOINLINE evalAST #-}
 
 
-getLoop :: Typeable a => AST a -> Loop
+getLoop :: Typeable t => AST t -> Loop
 getLoop = postprocessLoop . unsafePerformIO . fuseToLoop
 {-# NOINLINE getLoop #-}
 
 
--- | Prints code for an AST with line numbers to stdout.
-justIndexedCode :: Typeable e => AST e -> IO ()
-justIndexedCode ast = putStrLn $ indexed $ defaultPluginCode (getLoop ast) (tyArgTy ast)
+-- | Prints Haskell code for an AST with line numbers to stdout.
+printIndexedCode :: Typeable t => AST t -> IO ()
+printIndexedCode = putStrLn . indexed . getCode
 
 
--- | Prints code for an AST to stdout.
-justCode :: Typeable e => AST e -> IO ()
-justCode ast = putStrLn $ defaultPluginCode (getLoop ast) (tyArgTy ast)
+-- | Prints Haskell code for an AST to stdout.
+printCode :: Typeable t => AST t -> IO ()
+printCode = putStrLn . getCode
+
+
+-- | Get Haskell code for an AST.
+getCode :: Typeable t => AST t -> String
+getCode ast = defaultPluginCode (getLoop ast) (tyArgTy ast)
 
 
 -- | Gets TypeRep of a type arguments.
