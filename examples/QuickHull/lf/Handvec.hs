@@ -247,8 +247,8 @@ aboveAndFarthestP (PNested segd (P_2 (PDouble xs) (PDouble ys)))
   = let lens = U.lengthsSegd segd
         (above_xs, above_ys, far_xs, far_ys, lens') = aboveAndFarthest xs ys x1s y1s x2s y2s lens
         segd' = U.lengthsToSegd lens'
-    in ( PNested segd' (P_2 (PDouble above_ys) (PDouble above_ys))
-       , P_2 (PDouble far_xs) (PDouble far_ys) )
+    in  ( PNested segd' (P_2 (PDouble above_xs) (PDouble above_ys))
+        , P_2 (PDouble far_xs) (PDouble far_ys) )
 
 
 -- | Calculate cross product between vectors formed between a point and
