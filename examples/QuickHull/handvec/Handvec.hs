@@ -64,7 +64,7 @@ hsplit_l' nLines# points_s                                  -- E.g.: nLines#: 6,
           lines@(P_2 (P_2 (PDouble line_x1s) (PDouble line_y1s))
                      (P_2 (PDouble line_x2s) (PDouble line_y2s)))
   = let ( (PNested aboveSegd (P_2 (PDouble above_xs) (PDouble above_ys))),
-          (P_2 (PDouble far_xs) (PDouble far_ys)))
+          (P_2 (PDouble max_xs) (PDouble max_ys)))
           = aboveAndFarthestP points_s lines
 
         -- For some of the lines there are no more points left (segment length 0).
@@ -101,8 +101,8 @@ hsplit_l' nLines# points_s                                  -- E.g.: nLines#: 6,
         -- without touching the data arrays. I.e. data-wise purged_s = above_s
         purged_s@(PNested _ (P_2 (PDouble xs') (PDouble ys')))
                     = PNested purgedSegd (P_2 (PDouble above_xs) (PDouble above_ys))
-        --          = PNested purgedSegd (P_2 (PDouble $ U.packByTag xs emptyTags_r 0)
-        --                                    (PDouble $ U.packByTag ys emptyTags_r 0))
+        --          = PNested purgedSegd (P_2 (PDouble $ U.packByTag above_xs emptyTags_r 0)
+        --                                    (PDouble $ U.packByTag above_ys emptyTags_r 0))
 
         --- *** Prepare segd to call hsplit anew *** ---
         --- ***                                  *** ---
@@ -142,6 +142,11 @@ hsplit_l' nLines# points_s                                  -- E.g.: nLines#: 6,
         aboveDbl_s  = PNested dblSegd (P_2 (PDouble $ U.bpermute xs' ids_to_take)
                                            (PDouble $ U.bpermute ys' ids_to_take))
 
+
+        -- Remove points corresponding to lines with no points above them
+        fars@(P_2 (PDouble far_xs) (PDouble far_ys))
+                    = P_2 (PDouble $ U.packByTag max_xs emptyTags 0)
+                          (PDouble $ U.packByTag max_ys emptyTags 0)
 
         -- Find lines to and from the farthest points (i.e. [:(p1, pm), (pm, p2):] in the original code).
         -- Remember we are only dealing with lines for which there are still points above them.
@@ -240,7 +245,7 @@ aboveAndFarthestP (PNested segd (P_2 (PDouble xs) (PDouble ys)))
                     (P_2 (P_2 (PDouble x1s) (PDouble y1s))
                          (P_2 (PDouble x2s) (PDouble y2s)))
   = let lens = U.lengthsSegd segd
-        (above_xs, above_ys, far_xs, far_ys, lens') = aboveAndFarthest xs ys x1s x2s y1s y2s lens
+        (above_xs, above_ys, far_xs, far_ys, lens') = aboveAndFarthest xs ys x1s y1s x2s y2s lens
         segd' = U.lengthsToSegd lens'
     in ( PNested segd' (P_2 (PDouble above_ys) (PDouble above_ys))
        , P_2 (PDouble far_xs) (PDouble far_ys) )

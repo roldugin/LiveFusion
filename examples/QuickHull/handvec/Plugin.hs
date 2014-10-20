@@ -13,6 +13,7 @@
 -- let n = length xs
 --     (above_xs, above_ys, far_xs, far_ys, segd')
 --       = run xs ys segd x1s y1s x2s y2s xs ys n n n n n n
+{-# OPTIONS_GHC -w #-}
 {-# LANGUAGE BangPatterns #-}                                           
 module Plugin ( run ) where        
                                                                         
