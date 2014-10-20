@@ -11,7 +11,7 @@ Description:         LiveFusion example programs.
 Synopsis:            LiveFusion example programs.
 
 
-Executable quickhull
+Executable quickhull-lf
   Build-depends:  base, vector, random, old-time, containers, dph-base, dph-prim-par, dph-lifted-copy, ghc-prim, primitive
   Main-is:        Main.hs
   other-modules:  Handvec
@@ -19,5 +19,5 @@ Executable quickhull
                   AboveAndFarthestLF
                   Plugin
                   Timing Points2D.Types SVG
-  hs-source-dirs: QuickHull/handvec QuickHull/lib
+  hs-source-dirs: QuickHull/lf QuickHull/lib
   ghc-options:    -eventlog -rtsopts -threaded -fllvm -optlo-O3 -Odph -fcpr-off -fsimpl-tick-factor=1000
