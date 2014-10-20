@@ -304,9 +304,14 @@ pluginEntryCodeTH entryFnName loop resultTy
     tyEntryTy      = foldr to (thTypeRepTy resultTy)
                    $ map (thTypeRepTy . dynTypeRep) argVals
 
+    -- There may be more arguments to the loop that are required.
+    -- Only pass those required (See [1] below).
     loopCall       = runSTE
                    $ applyMany loopEntry
-                   $ map (TH.VarE . cgVarName) argVars
+                   $ map (TH.VarE . cgVarName) loopVars
+
+    loopVars       = assumedVarsOfBlock (unsafeLoopEntry loop)
+                   $ extendedEnv loop
 
     -- | Makes a type for (ty1 -> ty2)
     to :: Type -> Type -> Type
@@ -406,3 +411,18 @@ preamble moduleName =
   "sliceArray :: (V.Unbox a, PrimMonad m) => MV.MVector (PrimState m) a -> Int -> m (V.Vector a) " ++\
   "sliceArray vec len = V.unsafeFreeze $ MV.unsafeTake len vec             " ++\
   "                                                                        "
+
+
+
+{- [1]
+Sometimes the closure for the loop contains more arguments that the loop
+actually uses internally after all the optimisation.
+
+That is 'loopArgs' contains more arguments than are needed by 'init' and
+subsequent blocks.
+
+This may happen if, for example the replication length hint is actually not
+used in the loop because the length is determined by other means.
+
+By convention only those arguments required by the CFG are passed to 'init'.
+-}
