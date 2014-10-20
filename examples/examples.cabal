@@ -1,0 +1,23 @@
+Name:                examples
+Version:             0.1.0.0
+License:             BSD3
+Author:              George Roldugin
+Maintainer:          groldugin@cse.unsw.edu.au
+Build-Type:          Simple
+Cabal-Version:       >=1.8
+Stability:           experimental
+Category:            Data
+Description:         LiveFusion example programs.
+Synopsis:            LiveFusion example programs.
+
+
+Executable quickhull
+  Build-depends:  base, vector, random, old-time, containers, dph-base, dph-prim-par, dph-lifted-copy, ghc-prim, primitive
+  Main-is:        Main.hs
+  other-modules:  Handvec
+                  HandvecWrp
+                  AboveAndFarthestLF
+                  Plugin
+                  Timing Points2D.Types SVG
+  hs-source-dirs: QuickHull/handvec QuickHull/lib
+  ghc-options:    -eventlog -rtsopts -threaded -fllvm -optlo-O3 -Odph -fcpr-off -fsimpl-tick-factor=1000
