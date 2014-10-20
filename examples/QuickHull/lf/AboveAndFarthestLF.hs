@@ -16,3 +16,4 @@ aboveAndFarthest xs ys x1s y1s x2s y2s lens = (above_xs, above_ys, far_xs, far_y
   where
   	((((above_xs, above_ys), far_xs), far_ys), lens') = run xs ys lens x1s y1s x2s y2s xs ys n n n n n n
   	n = V.length xs
+{-# NOINLINE aboveAndFarthest #-}
