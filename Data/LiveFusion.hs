@@ -147,6 +147,20 @@ fV :: Elt a => V.Vector a -> Array a
 fV = fromVector
 
 
+-- | Computes two arrays in a single fused loop.
+--
+-- WARNING:
+-- Until we implements proper loop merging, subcomputations containing
+-- any filtering combinators ('filter', 'packByBoolTag', etc.), must come
+-- before any that don't. E.g.:
+-- @
+--  let xs = map (+2) [1,2,3]
+--      filtered = filter (>. 0) xs
+--      adjusted = map (* 0.5) xs
+--  in  both filtered adjusted
+--  -- NOT:
+--  in  both adjusted filtered
+-- @
 both :: (Elt a, Elt b)
      => Array a
      -> Array b
@@ -157,6 +171,9 @@ both a b = (fV a', fV b')
       $ a |*| b
 
 
+-- | Computes three arrays in a single fused loop.
+--
+-- Subject to WARNING in 'both'.
 three :: (Elt a, Elt b, Elt c)
       => Array a
       -> Array b
@@ -168,6 +185,9 @@ three a b c = (fV a', fV b', fV c')
       $ a |*| b |*| c
 
 
+-- | Computes four arrays in a single fused loop.
+--
+-- Subject to WARNING in 'both'.
 four :: (Elt a, Elt b, Elt c, Elt d)
      => Array a
      -> Array b
@@ -180,6 +200,9 @@ four a b c d = (fV a', fV b', fV c', fV d')
       $ a |*| b |*| c |*| d
 
 
+-- | Computes five arrays in a single fused loop.
+--
+-- Subject to WARNING in 'both'.
 five :: (Elt a, Elt b, Elt c, Elt d, Elt e)
      => Array a
      -> Array b
@@ -193,6 +216,9 @@ five a b c d e = (fV a', fV b', fV c', fV d', fV e')
       $ a |*| b |*| c |*| d |*| e
 
 
+-- | Computes six arrays in a single fused loop.
+--
+-- Subject to WARNING in 'both'.
 six :: (Elt a, Elt b, Elt c, Elt d, Elt e, Elt f)
      => Array a
      -> Array b
