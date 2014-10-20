@@ -212,127 +212,23 @@ hsplit_l' nLines# points_s                                  -- E.g.: nLines#: 6,
 {-# INLINE hsplit_l' #-}
 
 
-unpackSegd :: Segd -> (Array Int, Array Int, Int)
-unpackSegd segd = ( U.lengthsSegd  segd
-                  , U.indicesSegd  segd
-                  , U.elementsSegd segd )
-{-# INLINE unpackSegd #-}
-
-
--- | Find (relative) distances of points from line.
---
--- Each point can be above (positive distance) or below (negative distance)
--- a line as looking from the center of the convex hull.
---
--- Corresponds to 'cross' in the original program:
--- > cross  = [: distance p line | p <- points :]
-calcCross :: PData (PArray Point) -> PData Line -> PData (PArray Double)
-calcCross (PNested segd (P_2 (PDouble xs) (PDouble ys)))
-             (P_2 (P_2 (PDouble x1s) (PDouble y1s))
-                  (P_2 (PDouble x2s) (PDouble y2s)))
-  = let crosses = U.zipWith6 distance xs
-                                      ys
-                                      (U.replicate_s segd x1s)
-                                      (U.replicate_s segd y1s)
-                                      (U.replicate_s segd x2s)
-                                      (U.replicate_s segd y2s)
-    in PNested segd (PDouble crosses)
-{-# INLINE calcCross #-}
-
-
 aboveAndFarthestP :: PData (PArray Point) -> PData Line -> (PData (PArray Point), PData Point)
 aboveAndFarthestP (PNested segd (P_2 (PDouble xs) (PDouble ys)))
-                    (P_2 (P_2 (PDouble x1s) (PDouble y1s))
-                         (P_2 (PDouble x2s) (PDouble y2s)))
+                  (P_2 (P_2 (PDouble x1s) (PDouble y1s))
+                       (P_2 (PDouble x2s) (PDouble y2s)))
   = let lens = U.lengthsSegd segd
         (above_xs, above_ys, far_xs, far_ys, lens') = aboveAndFarthest xs ys x1s y1s x2s y2s lens
         segd' = U.lengthsToSegd lens'
     in  ( PNested segd' (P_2 (PDouble above_xs) (PDouble above_ys))
         , P_2 (PDouble far_xs) (PDouble far_ys) )
+{-# INLINE aboveAndFarthestP #-}
 
 
--- | Calculate cross product between vectors formed between a point and
---   each of the two line ends.
---
--- I.e. |x1-xo|   |x2-xo|
---      |     | x |     | = (x1-xo)(y2-yo)-(y1-yo)(x2-xo)
---      |y1-yo|   |y2-yo|
---
--- Not changed from the original source version thanks to vectavoid
--- (except tuples are dissolved).
-distance :: Double -> Double -- Point
-         -> Double -> Double -- Line start
-         -> Double -> Double -- Line end
-         -> Double          -- Distance
-distance xo yo x1 y1 x2 y2
-  = (x1 P.- xo) P.* (y2 P.- yo) P.- (y1 P.- yo) P.* (x2 P.- xo)
-{-# INLINE distance #-}
-
-
--- | Find points above the lines given distance-like measures.
---
--- Corresponds to 'packed' in the original program:
--- > packed = [: p | (p,c) <- zipP points cross, c D.> 0.0 :]
-calcAbove :: PData (PArray Point) -> PData (PArray Double) -> PData (PArray Point)
-calcAbove (PNested segd (P_2 (PDouble xs) (PDouble ys))) -- points_s
-          (PNested _    (PDouble distances))             -- cross_s
-  = let length    = U.elementsSegd segd
-
-        -- Compute emptySelctor for positive elements ((>0) -> 1; otherwise -> 0)
-        aboveSel  = U.tagsToSel2
-                  $ U.map B.fromBool
-                  $ U.zipWith (P.>) distances (U.replicate length 0.0)
-
-        -- Compute segd for just the positive elements
-        aboveSegd = U.lengthsToSegd (U.count_s segd (tagsSel2 aboveSel) 1)
-
-        -- Get the actual points corresponding to positive elements
-        aboveTags = U.tagsSel2 aboveSel
-        above_xs  = U.packByTag xs aboveTags 1
-        above_ys  = U.packByTag ys aboveTags 1
-
-    in  (PNested aboveSegd (P_2 (PDouble above_xs) (PDouble above_ys)))
-{-# INLINE calcAbove #-}
-
-
--- | For each line find a point fartherst from that line.
---
--- Each segment is a collection of points above a certain line.
--- The array of Doubles gives (relative) distances of points from the line.
---
--- Corresponds to 'pm' in the original program:
--- > pm = points !: maxIndexP cross
-calcFarthest :: PData (PArray Point) -> PData (PArray Double) -> Array Tag -> PData Point
-calcFarthest (PNested ptsSegd  (P_2 (PDouble xs) (PDouble ys))) -- ^ points_s
-             (PNested distSegd (PDouble distances))             -- ^ cross_s
-             emptyTags                                          -- ^ tag segments with no more
-                                                                --   points above the line
-  = let -- Index the distances array, and find the indices corresponding to the
-        -- largest distance in each segment
-        indexed  = U.zip (U.indices_s distSegd)
-                         distances
-        max_ids  = U.fsts
-                 $ U.fold1_s maxSnd distSegd indexed
-
-        -- Find indices to take from the points array by offsetting from segment starts
-        ids      = U.zipWith (P.+) (U.indicesSegd ptsSegd)
-                                   max_ids
-        max_xs   = U.bpermute xs ids
-        max_ys   = U.bpermute ys ids
-
-        -- We are only interested in the ones which are above the line
-        -- (thus from segments containing points above line).
-    in  P_2 (PDouble $ U.packByTag max_xs emptyTags 0)
-            (PDouble $ U.packByTag max_ys emptyTags 0)
-{-# INLINE calcFarthest #-}
-
-
--- | Find pair with the bigest second element.
--- from dph-lifted-copy:D.A.P.Prelude.Int
-maxSnd :: P.Ord b => (a, b) -> (a, b) -> (a, b)
-maxSnd (i,x) (j,y) | x P.>= y    = (i,x)
-                   | P.otherwise = (j,y)
-{-# INLINE maxSnd #-}
+unpackSegd :: Segd -> (Array Int, Array Int, Int)
+unpackSegd segd = ( U.lengthsSegd  segd
+                  , U.indicesSegd  segd
+                  , U.elementsSegd segd )
+{-# INLINE unpackSegd #-}
 
 
 -- | Unbox an integer.
