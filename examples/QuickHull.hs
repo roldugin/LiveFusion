@@ -8,7 +8,7 @@ import Data.LiveFusion as LF
 
 import Prelude as P hiding ( map, replicate, zip, zipWith, filter, fst, snd, unzip )
 
-import Debug.Trace
+
 
 farAndAbove :: (IsNum a, IsOrd a, Elt a)
             => Term Int            -- Number of points
@@ -28,7 +28,7 @@ farAndAbove npts segd xs ys x1s y1s x2s y2s
 
         -- Find points farthest from each line.
         (fars_xs, fars_ys) = calcFarthest npts segd xs ys distances
-    in  traceShow (getLoop $ fars_xs |*| fars_ys |*| above_xs |*| above_ys |*| aboveSegd) $ five fars_xs fars_ys above_xs above_ys aboveSegd
+    in  (fars_xs, fars_ys, above_xs, above_ys, aboveSegd)
 
 
 
